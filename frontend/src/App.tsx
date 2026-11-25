@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, closestCorners, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { LayoutGrid, Plus, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import { BoardColumn } from './components/BoardColumn';
@@ -12,8 +12,9 @@ import { filterTasks } from './utils/board';
 import { STATUSES, type Board, type Status, type Task, type TaskDraft, type User } from './types';
 
 export default function App() {
+  const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated' | 'error'>('checking');
   const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const authInitialized = useRef(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authError, setAuthError] = useState('');
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -22,7 +23,23 @@ export default function App() {
   const [boardId, setBoardId] = useState(() => new URLSearchParams(location.search).get('board') ?? '');
 
   useEffect(() => {
-    void api.authMe().then((result) => { setUser(result.user); setCsrfToken(result.csrfToken); }).catch(() => setUser(null)).finally(() => setAuthLoading(false));
+    if (authInitialized.current) return;
+    authInitialized.current = true;
+    if (import.meta.env.DEV) console.debug('[AUTH] initialization started');
+    void api.authMe()
+      .then((result) => {
+        setUser(result.user); setCsrfToken(result.csrfToken); setAuthState('authenticated');
+        if (import.meta.env.DEV) console.debug('[AUTH] authenticated', result.user.username);
+      })
+      .catch((reason) => {
+        const message = reason instanceof Error ? reason.message : 'Authentication check failed';
+        if (message.includes('401') || message.toLowerCase().includes('authentication required')) {
+          setUser(null); setCsrfToken(''); setAuthState('unauthenticated');
+        } else {
+          setUser(null); setAuthState('error'); setAuthError(message);
+        }
+        if (import.meta.env.DEV) console.debug('[AUTH] initialization result', message);
+      });
   }, []);
   useEffect(() => {
     const onPop = () => setBoardId(new URLSearchParams(location.search).get('board') ?? '');
@@ -30,19 +47,19 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  const openBoard = (id: string) => {
+  const openBoard = useCallback((id: string) => {
     const url = new URL(location.href); url.searchParams.set('board', id); history.pushState({}, '', url);
     setBoardId(id);
-  };
-  const dashboard = () => {
+  }, []);
+  const dashboard = useCallback(() => {
     const url = new URL(location.href); url.searchParams.delete('board'); history.pushState({}, '', url); setBoardId('');
-  };
+  }, []);
   const authenticate = async (username: string, password: string, confirmPassword: string) => {
     setAuthError('');
     const result = authMode === 'register' ? await api.register(username, password, confirmPassword) : await api.login(username, password);
-    setCsrfToken(result.csrfToken); setUser(result.user);
+    setCsrfToken(result.csrfToken); setUser(result.user); setAuthState('authenticated');
   };
-  const logout = async () => { await api.logout().catch(() => undefined); setUser(null); setCsrfToken(''); setBoardId(''); };
+  const logout = useCallback(async () => { await api.logout().catch(() => undefined); setUser(null); setCsrfToken(''); setBoardId(''); setAuthState('unauthenticated'); }, []);
   const changePassword = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const currentPassword = String(form.get('currentPassword') ?? ''); const newPassword = String(form.get('newPassword') ?? ''); const confirmPassword = String(form.get('confirmPassword') ?? '');
@@ -53,13 +70,15 @@ export default function App() {
     finally { setPasswordBusy(false); }
   };
 
-  if (authLoading) return <main className="dashboard-page"><div className="loading-state"><span className="loader" /><span>Loading...</span></div></main>;
-  if (!user && !boardId) return <AuthPage mode={authMode} onMode={(mode) => { setAuthMode(mode); setAuthError(''); }} onSubmit={authenticate} error={authError} />;
+  if (authState === 'checking') return <main className="dashboard-page"><div className="loading-state"><span className="loader" /><span>Loading...</span></div></main>;
+  if (authState === 'error') return <main className="dashboard-page"><section className="error-banner"><span>{authError}</span><button onClick={() => window.location.reload()}>Retry</button></section></main>;
+  if (authState === 'unauthenticated' || (!user && !boardId)) return <AuthPage mode={authMode} onMode={(mode) => { setAuthMode(mode); setAuthError(''); }} onSubmit={authenticate} error={authError} />;
   if (user && !boardId) return <><BoardDashboard username={user.username} onOpen={openBoard} onLogout={() => void logout()} onChangePassword={() => setPasswordOpen(true)} />{passwordOpen && <div className="modal-backdrop"><section className="task-modal"><header className="modal-header"><div><span className="eyebrow">SECURITY</span><h2>Change password</h2></div><button className="icon-button" onClick={() => setPasswordOpen(false)}><X size={18} /></button></header><form className="auth-form" onSubmit={changePassword}><label className="form-field"><span>Current password</span><input name="currentPassword" type="password" required /></label><label className="form-field"><span>New password</span><input name="newPassword" type="password" minLength={12} maxLength={128} required /></label><label className="form-field"><span>Confirm new password</span><input name="confirmPassword" type="password" minLength={12} maxLength={128} required /></label>{passwordError && <div className="form-error">{passwordError}</div>}<button className="button button-primary" disabled={passwordBusy}>Change password</button></form></section></div>}</>;
   return <><BoardView key={boardId} boardId={boardId} onDashboard={dashboard} onAccessRevoked={dashboard} />{passwordOpen && <div className="modal-backdrop"><section className="task-modal"><header className="modal-header"><div><span className="eyebrow">SECURITY</span><h2>Change password</h2></div><button className="icon-button" onClick={() => setPasswordOpen(false)}><X size={18} /></button></header><form className="auth-form" onSubmit={changePassword}><label className="form-field"><span>Current password</span><input name="currentPassword" type="password" required /></label><label className="form-field"><span>New password</span><input name="newPassword" type="password" minLength={12} maxLength={128} required /></label><label className="form-field"><span>Confirm new password</span><input name="confirmPassword" type="password" minLength={12} maxLength={128} required /></label>{passwordError && <div className="form-error">{passwordError}</div>}<button className="button button-primary" disabled={passwordBusy}>Change password</button></form></section></div>}</>;
 }
 
 function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string; onDashboard: () => void; onAccessRevoked: () => void }) {
+  useEffect(() => { if (import.meta.env.DEV) console.debug('[BOARD] mount', boardId); return () => { if (import.meta.env.DEV) console.debug('[BOARD] unmount', boardId); }; }, [boardId]);
   const [board, setBoard] = useState<Board | null>(null);
   const [boardError, setBoardError] = useState('');
   const [shareOpen, setShareOpen] = useState(false);
@@ -69,10 +88,20 @@ function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string;
   const [shareError, setShareError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [boardName, setBoardName] = useState('');
-  const loadBoard = async () => { try { const result = await api.getBoard(boardId); setBoard(result.board); setBoardName(result.board.name); setBoardError(''); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not load board.'); } };
-  useEffect(() => { void loadBoard(); }, [boardId]);
+  const loadBoard = useCallback(async () => {
+    if (import.meta.env.DEV) console.debug('[BOARD] fetch start', boardId);
+    try {
+      const result = await api.getBoard(boardId);
+      setBoard((current) => current?.id === result.board.id ? { ...current, ...result.board } : result.board);
+      setBoardName(result.board.name); setBoardError('');
+      if (import.meta.env.DEV) console.debug('[BOARD] fetch success', boardId);
+    } catch (reason) {
+      setBoardError(reason instanceof Error ? reason.message : 'Could not load board.');
+    }
+  }, [boardId]);
+  useEffect(() => { void loadBoard(); }, [loadBoard]);
   const canEdit = board?.role === 'owner' || board?.role === 'editor';
-  const boardState = useBoard(boardId, '', Boolean(canEdit), onAccessRevoked, () => void loadBoard());
+  const boardState = useBoard(boardId, '', Boolean(canEdit), onAccessRevoked, loadBoard);
   const [modal, setModal] = useState<{ task: Task | null; status: Status } | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [showFilters, setShowFilters] = useState(false);

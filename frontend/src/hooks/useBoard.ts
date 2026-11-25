@@ -114,16 +114,24 @@ export function useBoard(boardId: string, _csrfToken: string, canEdit: boolean, 
   }, [applyEvent, rememberEvent]);
 
   useEffect(() => {
+    if (import.meta.env.DEV) console.debug('[SSE] effect setup', boardId);
     void syncBoard(true);
     let opened = false;
     const connectionId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const source = new EventSource(api.eventUrl(boardId, connectionId), { withCredentials: true });
+    if (import.meta.env.DEV) console.debug('[SSE] connection established', boardId, connectionId);
     source.onopen = () => {
       setConnected(true);
       if (opened) void syncBoard();
       opened = true;
     };
-    source.onerror = () => setConnected(false);
+    source.onopen = () => {
+      setConnected(true);
+      if (import.meta.env.DEV) console.debug('[SSE] connection open', boardId);
+      if (opened) void syncBoard();
+      opened = true;
+    };
+    source.onerror = () => { setConnected(false); if (import.meta.env.DEV) console.debug('[SSE] connection reconnecting', boardId); };
     const receive = (message: MessageEvent<string>) => {
       try {
         dispatchRemoteEvent(parseBoardEvent(message));
@@ -138,7 +146,7 @@ export function useBoard(boardId: string, _csrfToken: string, canEdit: boolean, 
     source.addEventListener('presence:heartbeat', receive as EventListener);
     source.addEventListener('board:members-changed', receive as EventListener);
     source.addEventListener('board:access-revoked', () => { source.close(); setConnected(false); setPresence([]); onAccessRevoked(); });
-    return () => { source.close(); setConnected(false); setPresence([]); };
+    return () => { if (import.meta.env.DEV) console.debug('[SSE] connection closed', boardId, connectionId); source.close(); setConnected(false); setPresence([]); };
   }, [boardId, dispatchRemoteEvent, onAccessRevoked, syncBoard]);
 
   useEffect(() => {
