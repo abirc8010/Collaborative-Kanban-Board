@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { TaskModel, toTaskRecord, type Status, type TaskRecord } from '../models/Task.js';
+import { STATUSES, TaskModel, toTaskRecord, type Status, type TaskRecord } from '../models/Task.js';
 import type { CreateTaskInput, PatchTaskInput } from '../validation/taskSchemas.js';
 import { broadcast } from '../events/broadcaster.js';
 
@@ -17,20 +17,21 @@ async function getColumn(status: Status): Promise<TaskRecord[]> {
   return docs.map((doc) => toTaskRecord(doc));
 }
 
-async function normalizeColumns(statuses: Status[]): Promise<TaskRecord[]> {
+async function normalizeColumns(statuses: Status[], updatedAt = new Date()): Promise<TaskRecord[]> {
   const records: TaskRecord[] = [];
   for (const status of [...new Set(statuses)]) {
     const docs = await TaskModel.find({ status }).sort({ position: 1, _id: 1 }).exec();
-    const writes = docs.map((doc, position) => ({ updateOne: { filter: { _id: doc._id }, update: { $set: { position } } } }));
+    const writes = docs.map((doc, position) => ({ updateOne: { filter: { _id: doc._id }, update: { $set: { position, updatedAt } } } }));
     if (writes.length) await TaskModel.bulkWrite(writes);
-    docs.forEach((doc) => { doc.position = docs.indexOf(doc); records.push(toTaskRecord(doc)); });
+    const canonical = await TaskModel.find({ status }).sort({ position: 1, _id: 1 }).exec();
+    records.push(...canonical.map((doc) => toTaskRecord(doc)));
   }
   return records;
 }
 
 export async function listTasks(): Promise<TaskRecord[]> {
-  const docs = await TaskModel.find().sort({ status: 1, position: 1, _id: 1 }).exec();
-  return docs.map((doc) => toTaskRecord(doc));
+  const docs = await TaskModel.find().sort({ position: 1, _id: 1 }).exec();
+  return docs.map((doc) => toTaskRecord(doc)).sort((a, b) => STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status) || a.position - b.position);
 }
 
 export async function createTask(input: CreateTaskInput, mutationId?: string): Promise<TaskRecord> {
@@ -64,11 +65,11 @@ export async function updateTask(id: string, input: PatchTaskInput): Promise<{ t
       orderedIds.splice(insertAt, 0, id);
       doc.position = insertAt;
       await doc.save();
-      const idsToWrite = new Set([...target.map((task) => task.id), id]);
-      for (const [position, taskId] of orderedIds.entries()) {
-        if (idsToWrite.has(taskId)) await TaskModel.updateOne({ _id: taskId }, { $set: { status: newStatus, position } }).exec();
-      }
-      const affectedTasks = await normalizeColumns([oldStatus, newStatus]);
+      const positionWrites = orderedIds.map((taskId, position) => ({
+        updateOne: { filter: { _id: taskId }, update: { $set: { status: newStatus, position } } },
+      }));
+      if (positionWrites.length) await TaskModel.bulkWrite(positionWrites);
+      const affectedTasks = await normalizeColumns([oldStatus, newStatus], new Date());
       const updated = await TaskModel.findById(id).exec();
       if (!updated) throw new Error('Updated task disappeared');
       const canonical = toTaskRecord(updated);
@@ -88,8 +89,9 @@ export async function deleteTask(id: string, mutationId?: string): Promise<{ del
     const deleted = await TaskModel.findByIdAndDelete(id).exec();
     if (!deleted) throw Object.assign(new Error('Task not found'), { status: 404 });
     const status = deleted.status as Status;
-    const affectedTasks = await normalizeColumns([status]);
-    const response = { deletedId: id, affectedTasks };
+    const deletedAt = new Date().toISOString();
+    const affectedTasks = await normalizeColumns([status], new Date(deletedAt));
+    const response = { deletedId: id, deletedAt, affectedTasks };
     broadcast({ type: 'task-deleted', mutationId: mutationId ?? null, data: response });
     return response;
   });

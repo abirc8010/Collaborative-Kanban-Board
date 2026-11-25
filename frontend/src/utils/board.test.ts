@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { filterTasks, fromUrl, normalize, pushUrl, writeUrl } from './board';
+import { filterTasks, fromUrl, mergeBoardSnapshot, moveTask, normalize, ordered, pushUrl, writeUrl } from './board';
 import type { Task } from '../types';
 
 const seed: Task[] = [
@@ -16,6 +16,31 @@ describe('board state utilities', () => {
   });
   it('normalizes each column independently', () => {
     expect(normalize(seed).filter((task) => task.status === 'Todo').map((task) => task.position).sort()).toEqual([0, 1]);
+  });
+  it('does not resurrect a deleted task from a stale board response', () => {
+    const deletedAt = Date.parse('2026-01-02T00:00:00.000Z');
+    const staleTask = { ...seed[0]!, id: 'deleted', updatedAt: '2026-01-01T00:00:00.000Z' };
+    const staleResponse = mergeBoardSnapshot([], [staleTask], new Set(), new Map([['deleted', deletedAt]]), deletedAt + 1);
+    expect(staleResponse.tasks).toEqual([]);
+    const newerRecreatedTask = { ...staleTask, updatedAt: '2026-01-03T00:00:00.000Z' };
+    const newerResponse = mergeBoardSnapshot([], [newerRecreatedTask], new Set(), new Map([['deleted', deletedAt]]), deletedAt + 1);
+    expect(newerResponse.tasks).toEqual([newerRecreatedTask]);
+    expect(newerResponse.clearedTombstones).toEqual(['deleted']);
+  });
+  it('uses the required column order and calculates same-column and cross-column moves', () => {
+    const allStatuses: Task[] = [
+      { ...seed[0]!, id: 'todo', status: 'Todo' },
+      { ...seed[0]!, id: 'backlog', status: 'Backlog' },
+      { ...seed[0]!, id: 'done', status: 'Done' },
+      { ...seed[0]!, id: 'progress', status: 'In Progress' },
+    ];
+    expect(ordered(allStatuses).map((task) => task.status)).toEqual(['Backlog', 'Todo', 'In Progress', 'Done']);
+    const reordered = moveTask(seed, 'b', 'a', 'Todo');
+    expect(reordered?.tasks.filter((task) => task.status === 'Todo').map((task) => task.id)).toEqual(['a', 'b']);
+    const moved = moveTask(seed, 'a', 'column:Done', 'Done');
+    expect(moved?.tasks.filter((task) => task.status === 'Done').map((task) => task.id)).toEqual(['c', 'a']);
+    expect(moved?.affectedIds.sort()).toEqual(['a', 'b', 'c']);
+    expect(seed[0]?.status).toBe('Todo');
   });
   it('restores valid URL state and ignores invalid enum values', () => {
     expect(fromUrl('?search=auth&priority=high&assignee=abir')).toEqual({ search: 'auth', priority: 'high', assignee: 'abir' });

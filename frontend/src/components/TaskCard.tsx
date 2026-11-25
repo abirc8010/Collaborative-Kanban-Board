@@ -20,7 +20,7 @@ export function TaskCard({ task, onOpen, dragDisabled = false }: { task: Task; o
   return <article ref={setNodeRef} style={style} className="task-card" onClick={() => onOpen(task)}>
     <div className="task-card-top">
       <span className={`priority-badge priority-${task.priority}`}><i />{task.priority}</span>
-      <button className="drag-handle" aria-label={`Drag ${task.title}`} onClick={(event) => event.stopPropagation()} {...attributes} {...listeners}><GripVertical size={16} /></button>
+      <button {...(dragDisabled ? {} : attributes)} {...(dragDisabled ? {} : listeners)} className={`drag-handle ${dragDisabled ? 'drag-disabled' : ''}`} aria-label={dragDisabled ? `Clear filters to move ${task.title}` : `Drag ${task.title}`} aria-disabled={dragDisabled} tabIndex={dragDisabled ? -1 : 0} onClick={(event) => event.stopPropagation()}><GripVertical size={16} /></button>
     </div>
     <h3>{task.title}</h3>
     {task.description && <p className="task-description">{task.description}</p>}

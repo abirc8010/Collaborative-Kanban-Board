@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, parseBoardEvent } from '../services/api';
-import { fromUrl, normalize, ordered, pushUrl, writeUrl } from '../utils/board';
+import { fromUrl, mergeBoardSnapshot, moveTask, normalize, ordered, pushUrl, writeUrl } from '../utils/board';
 import { STATUSES, type BoardEvent, type Filters, type Status, type Task, type TaskDraft } from '../types';
 
 interface PendingMutation { ids: Set<string>; before: Task[]; }
@@ -18,6 +18,17 @@ export function useBoard() {
   const pending = useRef(new Map<string, PendingMutation>());
   const buffers = useRef(new Map<string, BoardEvent[]>());
   const versions = useRef(new Map<string, number>());
+  const tombstones = useRef(new Map<string, number>());
+  const handledEventIds = useRef(new Set<string>());
+  const ownMutationIds = useRef(new Set<string>());
+  const searchHistoryTimer = useRef<number | null>(null);
+
+  const rememberEvent = useCallback((event: BoardEvent) => {
+    const key = event.eventId ?? event.mutationId;
+    if (!key) return;
+    handledEventIds.current.add(key);
+    if (handledEventIds.current.size > 500) handledEventIds.current.delete(handledEventIds.current.values().next().value as string);
+  }, []);
 
   const commit = useCallback((next: Task[] | ((current: Task[]) => Task[])) => {
     const resolved = typeof next === 'function' ? next(tasksRef.current) : next;
@@ -27,14 +38,14 @@ export function useBoard() {
 
   const syncBoard = useCallback(async (showSpinner = false) => {
     if (showSpinner) setLoading(true);
+    const requestedAt = Date.now();
     try {
       const result = await api.board();
       commit((current) => {
         const localIds = new Set([...pending.current.values()].flatMap((entry) => [...entry.ids]));
-        const remoteById = new Map(result.tasks.map((task) => [task.id, task]));
-        const preserved = current.filter((task) => localIds.has(task.id));
-        for (const task of preserved) remoteById.delete(task.id);
-        return [...remoteById.values(), ...preserved];
+        const merged = mergeBoardSnapshot(current, result.tasks, localIds, tombstones.current, requestedAt);
+        for (const id of merged.clearedTombstones) tombstones.current.delete(id);
+        return merged.tasks;
       });
       setError('');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load the board.'); }
@@ -43,14 +54,22 @@ export function useBoard() {
 
   const applyEvent = useCallback((event: BoardEvent) => {
     const changed = relevantTasks(event);
-    if (event.type === 'task-deleted' && event.data.deletedId) {
-      commit((current) => current.filter((task) => task.id !== event.data.deletedId));
-      return;
-    }
-    if (!changed.length) return;
+    const deletedId = event.type === 'task-deleted' ? event.data.deletedId : undefined;
+    const deletedAt = Date.parse(event.data.deletedAt ?? new Date().toISOString());
+    if (!changed.length && !deletedId) return;
     commit((current) => {
       const byId = new Map(current.map((task) => [task.id, task]));
+      if (deletedId) {
+        const existing = byId.get(deletedId);
+        if (!existing || Date.parse(existing.updatedAt) <= deletedAt) {
+          tombstones.current.set(deletedId, Math.max(tombstones.current.get(deletedId) ?? 0, deletedAt));
+          byId.delete(deletedId);
+        }
+      }
       for (const incoming of changed) {
+        const deletedAtForTask = tombstones.current.get(incoming.id);
+        if (deletedAtForTask !== undefined && Date.parse(incoming.updatedAt) <= deletedAtForTask) continue;
+        if (deletedAtForTask !== undefined) tombstones.current.delete(incoming.id);
         const existing = byId.get(incoming.id);
         if (!existing || Date.parse(incoming.updatedAt) >= Date.parse(existing.updatedAt)) byId.set(incoming.id, incoming);
       }
@@ -59,17 +78,33 @@ export function useBoard() {
   }, [commit]);
 
   const dispatchRemoteEvent = useCallback((event: BoardEvent) => {
-    if (event.mutationId && pending.current.has(event.mutationId)) return;
+    const key = event.eventId ?? event.mutationId;
+    if (key && handledEventIds.current.has(key)) return;
+    if (event.mutationId && pending.current.has(event.mutationId)) {
+      buffers.current.set(event.mutationId, [...(buffers.current.get(event.mutationId) ?? []), event]);
+      return;
+    }
+    if (event.mutationId && ownMutationIds.current.has(event.mutationId)) {
+      rememberEvent(event);
+      return;
+    }
     const impacted = relevantTasks(event).map((task) => task.id);
     if (event.data.deletedId) impacted.push(event.data.deletedId);
     const entries = [...pending.current.entries()].filter(([, mutation]) => impacted.some((taskId) => mutation.ids.has(taskId)));
     if (entries.length) {
       for (const [id] of entries) buffers.current.set(id, [...(buffers.current.get(id) ?? []), event]);
-    } else applyEvent(event);
-  }, [applyEvent]);
+    } else {
+      applyEvent(event);
+      rememberEvent(event);
+    }
+  }, [applyEvent, rememberEvent]);
 
   useEffect(() => {
     void syncBoard(true);
+    if (!api.base) {
+      setConnected(false);
+      return;
+    }
     let opened = false;
     const source = new EventSource(api.eventUrl());
     source.onopen = () => {
@@ -90,14 +125,31 @@ export function useBoard() {
   }, [dispatchRemoteEvent, syncBoard]);
 
   useEffect(() => {
-    const onPopState = () => setFilters(fromUrl(window.location.search));
+    const onPopState = () => {
+      if (searchHistoryTimer.current !== null) window.clearTimeout(searchHistoryTimer.current);
+      searchHistoryTimer.current = null;
+      setFilters(fromUrl(window.location.search));
+    };
     window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      if (searchHistoryTimer.current !== null) window.clearTimeout(searchHistoryTimer.current);
+    };
   }, []);
   useEffect(() => { writeUrl(filters); }, [filters]);
   const changeFilters = useCallback((patch: Partial<Filters>) => setFilters((current) => {
     const next = { ...current, ...patch };
-    if (Object.keys(patch).some((key) => key !== 'search')) pushUrl(next);
+    if (Object.keys(patch).some((key) => key !== 'search')) {
+      if (searchHistoryTimer.current !== null) window.clearTimeout(searchHistoryTimer.current);
+      searchHistoryTimer.current = null;
+      pushUrl(next);
+    } else {
+      const startSearchEntry = searchHistoryTimer.current === null;
+      if (startSearchEntry) pushUrl(next);
+      else writeUrl(next);
+      if (searchHistoryTimer.current !== null) window.clearTimeout(searchHistoryTimer.current);
+      searchHistoryTimer.current = window.setTimeout(() => { searchHistoryTimer.current = null; }, 650);
+    }
     return next;
   }), []);
 
@@ -119,7 +171,13 @@ export function useBoard() {
       setError('');
       const currentIds = new Set(ids.filter((taskId) => versions.current.get(taskId) === mutationVersions.get(taskId)));
       reconcile(response, currentIds);
+      if (response && typeof response === 'object' && 'deletedId' in response && 'deletedAt' in response) {
+        const deletion = response as { deletedId: string; deletedAt: string };
+        tombstones.current.set(deletion.deletedId, Math.max(tombstones.current.get(deletion.deletedId) ?? 0, Date.parse(deletion.deletedAt)));
+      }
       const queued = buffers.current.get(id) ?? [];
+      ownMutationIds.current.add(id);
+      if (ownMutationIds.current.size > 500) ownMutationIds.current.delete(ownMutationIds.current.values().next().value as string);
       pending.current.delete(id);
       buffers.current.delete(id);
       for (const event of queued) dispatchRemoteEvent(event);
@@ -135,7 +193,7 @@ export function useBoard() {
       setNotice(reason instanceof Error ? reason.message : `${label} failed. Your previous board state was restored.`);
       throw reason;
     }
-  }, [applyEvent, commit, dispatchRemoteEvent]);
+  }, [commit, dispatchRemoteEvent]);
 
   const create = useCallback(async (draft: TaskDraft) => {
     const tempId = `local-${mutationId()}`;
@@ -145,34 +203,30 @@ export function useBoard() {
 
   const update = useCallback(async (task: Task, patch: Partial<TaskDraft>) => {
     const currentTask = tasksRef.current.find((item) => item.id === task.id) ?? task;
-    const priorColumn = tasksRef.current.filter((item) => item.status === currentTask.status).map((item) => item.id);
-    const nextStatus = patch.status ?? currentTask.status;
-    const ids = [...new Set([task.id, ...priorColumn, ...tasksRef.current.filter((item) => item.status === nextStatus).map((item) => item.id)])];
-    await runMutation(ids, () => commit((current) => current.map((item) => item.id === task.id ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item)), (id) => api.update(task.id, patch, id), ({ affectedTasks }, currentIds) => commit((current) => [...current.filter((item) => !affectedTasks.some((affected) => currentIds.has(affected.id) && affected.id === item.id)), ...affectedTasks.filter((affected) => currentIds.has(affected.id))]), 'Update task');
+    const ids = patch.status && patch.status !== currentTask.status
+      ? [...new Set([task.id, ...tasksRef.current.filter((item) => item.status === currentTask.status || item.status === patch.status).map((item) => item.id)])]
+      : [task.id];
+    await runMutation(ids, () => commit((current) => {
+      const currentTask = current.find((item) => item.id === task.id);
+      if (!currentTask) return current;
+      const nextStatus = patch.status ?? currentTask.status;
+      const moved = { ...currentTask, ...patch, status: nextStatus, updatedAt: new Date().toISOString() };
+      if (nextStatus === currentTask.status) return current.map((item) => item.id === task.id ? moved : item);
+      const nextPosition = current.filter((item) => item.status === nextStatus).length;
+      return normalize([...current.filter((item) => item.id !== task.id), { ...moved, position: nextPosition }]);
+    }), (id) => api.update(task.id, patch, id), ({ affectedTasks }, currentIds) => commit((current) => [...current.filter((item) => !affectedTasks.some((affected) => currentIds.has(affected.id) && affected.id === item.id)), ...affectedTasks.filter((affected) => currentIds.has(affected.id))]), 'Update task');
   }, [commit, runMutation]);
 
   const remove = useCallback(async (task: Task) => {
-    const ids = tasksRef.current.filter((item) => item.status === task.status).map((item) => item.id);
+    const currentTask = tasksRef.current.find((item) => item.id === task.id) ?? task;
+    const ids = tasksRef.current.filter((item) => item.status === currentTask.status).map((item) => item.id);
     await runMutation(ids, () => commit((current) => current.filter((item) => item.id !== task.id)), (id) => api.remove(task.id, id), ({ affectedTasks }, currentIds) => commit((current) => [...current.filter((item) => item.id !== task.id && !(currentIds.has(item.id) && affectedTasks.some((affected) => affected.id === item.id))), ...affectedTasks.filter((affected) => currentIds.has(affected.id))]), 'Delete task');
   }, [commit, runMutation]);
 
   const move = useCallback(async (activeId: string, overId: string, targetStatus: Status) => {
-    const current = ordered(tasksRef.current);
-    const source = current.find((task) => task.id === activeId);
-    if (!source) return;
-    const from = current.filter((task) => task.status === source.status);
-    const to = targetStatus === source.status ? from : current.filter((task) => task.status === targetStatus);
-    const oldIndex = from.findIndex((task) => task.id === activeId);
-    let newIndex = overId.startsWith('column:') ? to.length : to.findIndex((task) => task.id === overId);
-    if (newIndex < 0) newIndex = to.length;
-    if (source.status === targetStatus && oldIndex === newIndex) return;
-    const moved = { ...source, status: targetStatus, position: newIndex, updatedAt: new Date().toISOString() };
-    const next = current.filter((task) => task.id !== activeId);
-    const dest = next.filter((task) => task.status === targetStatus);
-    dest.splice(Math.min(newIndex, dest.length), 0, moved);
-    const normalized = normalize([...next.filter((task) => task.status !== targetStatus), ...dest]);
-    const ids = [...new Set([...from.map((task) => task.id), ...to.map((task) => task.id)])];
-    await runMutation(ids, () => commit(normalized), (id) => api.update(activeId, { status: targetStatus, position: newIndex }, id), ({ affectedTasks }, currentIds) => commit((board) => [...board.filter((task) => !affectedTasks.some((affected) => currentIds.has(affected.id) && affected.id === task.id)), ...affectedTasks.filter((affected) => currentIds.has(affected.id))]), 'Move task');
+    const change = moveTask(tasksRef.current, activeId, overId, targetStatus);
+    if (!change) return;
+    await runMutation(change.affectedIds, () => commit(change.tasks), (id) => api.update(activeId, { status: targetStatus, position: change.position }, id), ({ affectedTasks }, currentIds) => commit((board) => [...board.filter((task) => !affectedTasks.some((affected) => currentIds.has(affected.id) && affected.id === task.id)), ...affectedTasks.filter((affected) => currentIds.has(affected.id))]), 'Move task');
   }, [commit, runMutation]);
 
   const visibleTasks = useMemo(() => ordered(tasks), [tasks]);

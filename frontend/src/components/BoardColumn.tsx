@@ -6,7 +6,7 @@ import { TaskCard } from './TaskCard';
 
 const icons = { Backlog: CircleDashed, Todo: Circle, 'In Progress': CircleDot, Done: CircleCheck };
 const iconClasses = { Backlog: 'status-backlog', Todo: 'status-todo', 'In Progress': 'status-progress', Done: 'status-done' };
-export function BoardColumn({ status, tasks, onAdd, onOpen }: { status: Status; tasks: Task[]; onAdd: (status: Status) => void; onOpen: (task: Task) => void }) {
+export function BoardColumn({ status, tasks, onAdd, onOpen, dragDisabled = false }: { status: Status; tasks: Task[]; onAdd: (status: Status) => void; onOpen: (task: Task) => void; dragDisabled?: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: `column:${status}` });
   const Icon = icons[status];
   return <section ref={setNodeRef} className={`board-column ${isOver ? 'column-over' : ''}`} aria-label={`${status} column`}>
@@ -16,7 +16,7 @@ export function BoardColumn({ status, tasks, onAdd, onOpen }: { status: Status; 
     </div>
     <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
       <div className="column-list">
-        {tasks.length ? tasks.map((task) => <TaskCard key={task.id} task={task} onOpen={onOpen} />) : <div className="empty-column"><span className="empty-icon"><Icon size={19} /></span><strong>Nothing here yet</strong><span>Drop a task here or add one to get started.</span><button onClick={() => onAdd(status)}><Plus size={15} /> Add a task</button></div>}
+        {tasks.length ? tasks.map((task) => <TaskCard key={task.id} task={task} onOpen={onOpen} dragDisabled={dragDisabled} />) : dragDisabled ? <div className="empty-filtered" /> : <div className="empty-column"><span className="empty-icon"><Icon size={19} /></span><strong>Nothing here yet</strong><span>Drop a task here or add one to get started.</span><button onClick={() => onAdd(status)}><Plus size={15} /> Add a task</button></div>}
       </div>
     </SortableContext>
   </section>;

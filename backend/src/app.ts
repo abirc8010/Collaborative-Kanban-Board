@@ -7,8 +7,8 @@ import { errorHandler } from './controllers/taskController.js';
 
 export const app = express();
 app.use(cors({ origin: (origin, callback) => {
-  if (!origin || config.clientOrigins.includes('*') || config.clientOrigins.includes(origin)) callback(null, true);
-  else callback(new Error('Origin is not allowed by CORS'));
+  if (!origin || config.allowAnyOrigin || config.clientOrigins.includes(origin)) callback(null, true);
+  else callback(Object.assign(new Error('Origin is not allowed by CORS'), { status: 403 }));
 } }));
 app.use(express.json({ limit: '32kb' }));
 app.get('/api/health', (_req, res) => {

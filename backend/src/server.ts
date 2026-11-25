@@ -10,7 +10,7 @@ async function start(): Promise<void> {
   app.listen(config.port, () => console.info(`Kanban API listening on port ${config.port}`));
 }
 
-start().catch((error: unknown) => {
-  console.error('Unable to start Kanban API:', error);
+start().catch(() => {
+  console.error('Unable to start Kanban API: database connection or server startup failed.');
   process.exitCode = 1;
 });

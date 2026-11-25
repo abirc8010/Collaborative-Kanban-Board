@@ -20,7 +20,8 @@ export interface TaskDraft {
 }
 export interface Filters { search: string; priority: Priority | 'all'; assignee: string | 'all'; }
 export interface BoardEvent {
+  eventId?: string;
   type: 'task-created' | 'task-updated' | 'task-deleted';
   mutationId: string | null;
-  data: { task?: Task; affectedTasks?: Task[]; deletedId?: string };
+  data: { task?: Task; affectedTasks?: Task[]; deletedId?: string; deletedAt?: string };
 }

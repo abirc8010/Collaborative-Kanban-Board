@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
+import { config } from './config.js';
 
 describe('HTTP API surface', () => {
   it('reports database readiness through the health endpoint', async () => {
@@ -17,6 +18,21 @@ describe('HTTP API surface', () => {
       expect.objectContaining({ field: 'title' }),
       expect.objectContaining({ field: 'assignee' }),
     ]));
+  });
+
+  it('rejects disallowed browser origins with a 403 JSON response', async () => {
+    const previousOrigins = config.clientOrigins;
+    const previousWildcard = config.allowAnyOrigin;
+    config.clientOrigins = ['http://localhost:5173'];
+    config.allowAnyOrigin = false;
+    try {
+      const response = await request(app).get('/api/health').set('Origin', 'https://not-allowed.example');
+      expect(response.status).toBe(403);
+      expect(response.body).toEqual({ error: 'Origin is not allowed by CORS' });
+    } finally {
+      config.clientOrigins = previousOrigins;
+      config.allowAnyOrigin = previousWildcard;
+    }
   });
 
   it('returns 404 for malformed task identifiers without querying MongoDB', async () => {
