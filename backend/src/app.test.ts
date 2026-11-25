@@ -7,6 +7,14 @@ import { resolve } from 'node:path';
 import { clearSessionCookie, setSessionCookie, verifyCsrf } from './middleware/auth.js';
 
 describe('HTTP API surface', () => {
+  it('constructs frontend endpoints with exactly one /api prefix', () => {
+    const apiSource = readFileSync(resolve(process.cwd(), '../frontend/src/services/api.ts'), 'utf8');
+    expect(apiSource).toContain("const API_PREFIX = '/api';");
+    expect(apiSource).not.toContain('/api/api');
+    expect(apiSource).not.toContain('VITE_API_BASE_URL');
+  });
+
+
   it('marks API responses private and prevents caching', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/app.ts'), 'utf8');
     expect(source).toContain("private, no-store, max-age=0");
@@ -44,7 +52,7 @@ describe('HTTP API surface', () => {
     expect(apiRewrite?.destination).toMatch(/^https:\/\//);
     const apiClient = readFileSync(resolve(process.cwd(), '../frontend/src/services/api.ts'), 'utf8');
     expect(apiClient).not.toContain('collaborative-kanban-api.onrender.com');
-    expect(apiClient).toContain('const API_BASE =');
+    expect(apiClient).toContain("const API_PREFIX = '/api';");
   });
 
   it('does not expose the Render host or session storage in the frontend', () => {

@@ -36,7 +36,12 @@ export async function removeTask(req: Request, res: Response, next: NextFunction
 
 export function errorHandler(error: unknown, _req: Request, res: Response, _next: NextFunction): void {
   if (error instanceof ZodError) {
-    res.status(400).json({ error: 'Validation failed', details: error.issues.map((issue) => ({ field: issue.path.join('.'), message: issue.message })) });
+    const details = error.issues.map((issue) => ({ field: issue.path.join('.'), message: issue.message }));
+    const confirmation = details.find((detail) => detail.field === 'confirmPassword');
+    const password = details.find((detail) => detail.field === 'password');
+    const username = details.find((detail) => detail.field === 'username');
+    const message = confirmation?.message ?? password?.message ?? username?.message ?? 'Validation failed';
+    res.status(400).json({ error: message, details });
     return;
   }
   const candidate = error as { status?: number; message?: string };

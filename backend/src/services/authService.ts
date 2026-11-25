@@ -52,7 +52,7 @@ export async function registerUser(username: string, password: string): Promise<
     });
   } catch (error) {
     const candidate = error as { code?: number; keyPattern?: Record<string, number> };
-    if (candidate.code === 11000 && candidate.keyPattern?.normalizedUsername) throw Object.assign(new Error('That username is already taken.'), { status: 409 });
+    if (candidate.code === 11000 && candidate.keyPattern?.normalizedUsername) throw Object.assign(new Error('That username is already taken. Try signing in or choose another username.'), { status: 409 });
     throw error;
   } finally { await session.endSession(); }
   if (!userId) throw new Error('Unable to complete registration');
