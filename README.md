@@ -4,7 +4,7 @@ A full-stack collaborative project management application for organizing work ac
 
 - **Live Application:** [https://kanban-board-neon-kappa.vercel.app](https://kanban-board-neon-kappa.vercel.app)
 - **Source Code:** [https://github.com/abirc8010/Collaborative-Kanban-Board](https://github.com/abirc8010/Collaborative-Kanban-Board)
-- **Demo Video:** [Watch the Demo](ADD_DEMO_VIDEO_URL)
+- **Demo Video:** [Watch the Demo](https://drive.google.com/file/d/1yjvxfYMxLTk8FFGdo9vteKccPUsUOBVv/view?usp=sharing)
 
 > **⚠️ Deployment Notice: The backend is hosted on Render's Free Tier. Due to free-tier limitations, the service may spin down after periods of inactivity. Consequently, the first request after an idle period may experience increased latency or a delay while the service wakes up. Subsequent requests may be faster once the service is active.**
 
