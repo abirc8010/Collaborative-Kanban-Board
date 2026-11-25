@@ -9,28 +9,28 @@ function maybeFail(): void {
 }
 
 export async function getBoard(_req: Request, res: Response, next: NextFunction): Promise<void> {
-  try { res.json({ tasks: await listTasks() }); } catch (error) { next(error); }
+  try { res.json({ tasks: await listTasks(String(_req.boardAccess?.boardId)) }); } catch (error) { next(error); }
 }
 export async function postTask(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     maybeFail();
     const parsed = createMutationSchema.parse(req.body);
-    const { mutationId, ...input } = parsed;
-    res.status(201).json({ task: await createTask(createTaskSchema.parse(input), mutationId) });
+    const { mutationId, boardId: _boardId, ...input } = parsed;
+    res.status(201).json({ task: await createTask(String(req.boardAccess?.boardId), createTaskSchema.parse(input), mutationId) });
   } catch (error) { next(error); }
 }
 export async function patchTask(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     maybeFail();
     const input = patchTaskSchema.parse(req.body);
-    res.json(await updateTask(String(req.params.id ?? ''), input));
+    res.json(await updateTask(String(req.boardAccess?.boardId), String(req.params.id ?? ''), input));
   } catch (error) { next(error); }
 }
 export async function removeTask(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     maybeFail();
     const mutationId = typeof req.body?.mutationId === 'string' ? req.body.mutationId : undefined;
-    res.json(await deleteTask(String(req.params.id ?? ''), mutationId));
+    res.json(await deleteTask(String(req.boardAccess?.boardId), String(req.params.id ?? ''), mutationId));
   } catch (error) { next(error); }
 }
 

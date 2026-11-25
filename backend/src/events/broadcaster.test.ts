@@ -1,7 +1,7 @@
 import { PassThrough } from 'node:stream';
 import type { Response } from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
-import { addClient, broadcast, connectedClients } from './broadcaster.js';
+import { addClient, broadcast, connectedClients, connectBoardClient } from './broadcaster.js';
 
 const disconnect: Array<() => void> = [];
 afterEach(() => {
@@ -9,13 +9,22 @@ afterEach(() => {
 });
 
 describe('SSE broadcaster', () => {
+  it('does not send authenticated presence snapshots to public visitors', () => {
+    const response = new PassThrough();
+    response.setEncoding('utf8');
+    disconnect.push(connectBoardClient(response as unknown as Response, 'public-board', { connectionId: '11111111-1111-4111-8111-111111111111', userId: null, username: null, role: 'public', sessionId: null, expiresAt: null }));
+    const payload = response.read() as string | null;
+    expect(payload ?? '').not.toContain('presence:snapshot');
+    expect(payload ?? '').not.toContain('presence:joined');
+  });
+
   it('sends named events with IDs and removes closed clients', () => {
     const response = new PassThrough();
     response.setEncoding('utf8');
     disconnect.push(addClient(response as unknown as Response));
     expect(connectedClients()).toBe(1);
 
-    broadcast({ type: 'task-updated', mutationId: 'local-123', data: { task: { id: 'task-1' } } });
+    broadcast({ boardId: 'legacy-test', type: 'task-updated', mutationId: 'local-123', data: { task: { id: 'task-1' } } });
     const payload = response.read() as string;
     expect(payload).toContain('id: ');
     expect(payload).toContain('event: task-updated');

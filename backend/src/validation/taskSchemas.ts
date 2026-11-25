@@ -19,6 +19,6 @@ export const patchTaskSchema = z.object({
   mutationId: z.string().min(1).max(100).optional(),
 }).strict().refine((value) => Object.keys(value).some((key) => key !== 'mutationId'), 'At least one task field must be provided');
 
-export const createMutationSchema = createTaskSchema.extend({ mutationId: z.string().min(1).max(100).optional() }).strict();
+export const createMutationSchema = createTaskSchema.extend({ mutationId: z.string().min(1).max(100).optional(), boardId: z.string().optional() }).strict();
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type PatchTaskInput = z.infer<typeof patchTaskSchema>;

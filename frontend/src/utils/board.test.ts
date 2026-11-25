@@ -3,9 +3,9 @@ import { filterTasks, fromUrl, mergeBoardSnapshot, moveTask, normalize, ordered,
 import type { Task } from '../types';
 
 const seed: Task[] = [
-  { id: 'a', title: 'Authentication flow', description: '', priority: 'high', assignee: 'Abir', status: 'Todo', position: 1, updatedAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'b', title: 'Landing page', description: '', priority: 'low', assignee: 'Maya', status: 'Todo', position: 0, updatedAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'c', title: 'Audit login', description: '', priority: 'high', assignee: 'Abir', status: 'Done', position: 0, updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'a', boardId: 'test-board', title: 'Authentication flow', description: '', priority: 'high', assignee: 'Abir', status: 'Todo', position: 1, updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'b', boardId: 'test-board', title: 'Landing page', description: '', priority: 'low', assignee: 'Maya', status: 'Todo', position: 0, updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'c', boardId: 'test-board', title: 'Audit login', description: '', priority: 'high', assignee: 'Abir', status: 'Done', position: 0, updatedAt: '2026-01-01T00:00:00.000Z' },
 ];
 
 describe('board state utilities', () => {

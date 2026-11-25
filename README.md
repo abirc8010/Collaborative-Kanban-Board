@@ -1,138 +1,86 @@
-# Kanban Board
+# Collaborative Kanban
 
-A real-time shared Kanban board for planning and shipping work. The app includes a responsive four-column board, task CRUD, drag-and-drop ordering, combined search and filters, URL-persisted view state, optimistic mutation handling, MongoDB persistence, and native Server-Sent Events (SSE) collaboration.
+A multi-user Kanban application built with React/Vite, Express/TypeScript, MongoDB, and native Server-Sent Events.
 
 ## Features
 
-- Exactly four ordered columns: Backlog, Todo, In Progress, Done.
-- Create, edit, move, reorder, and delete tasks with title, description, priority, assignee, status, position, and ISO `updatedAt`.
-- dnd-kit drag-and-drop across columns and within a column.
-- Case-insensitive title search combined with priority and assignee filters; filters are reflected in query parameters and restored on refresh/back/forward.
-- Immediate optimistic UI updates with targeted rollback on failed requests.
-- Shared-board updates over native SSE, including affected positions for reorders, mutation IDs, pending-task event buffering, and API resynchronization after reconnect.
-- MongoDB-backed persistence, startup sample data only when the collection is empty, health endpoint, validation, and deployment configuration.
-- Optional deterministic API failure simulation in development for rollback checks.
-- Dragging is disabled while filters are active so a partial view cannot corrupt persisted task positions.
+- Username/password accounts (no email), Argon2id password hashing, opaque hashed server-side sessions, 7-day expiration, logout, password change, and CSRF validation.
+- Multiple boards; board ownership; public/private visibility; username sharing; Viewer and Editor roles.
+- Four fixed columns: Backlog, Todo, In Progress, Done.
+- Task search, priority and assignee filters, drag-and-drop, optimistic updates and rollback, mutation reconciliation, and SSE resynchronization.
+- Board-specific live presence for authenticated users, with deduplicated usernames across tabs and 75-second heartbeat leases.
+- Safe legacy task migration to a private board owned by the first registered account.
 
-## Technology
+## Local setup
 
-- Frontend: React 18, TypeScript, Vite, Tailwind CSS, dnd-kit, Lucide React.
-- Backend: Node.js, Express, TypeScript, Mongoose, Zod, native SSE.
-- Database: MongoDB (Atlas M0 compatible).
-- Hosting: Vercel (frontend) and Render (API).
-
-## Architecture
-
-The frontend is a Vite app under `frontend/`. `useBoard` owns board loading, URL state, optimistic mutations, per-task mutation versions, SSE event buffering, event deduplication, and reconnect resynchronization. UI components remain separate for the board columns, cards, and task modal. The API client is isolated in `frontend/src/services/api.ts`. The interface intentionally has no login, workspace, team, activity, profile, or fake collaborator controls.
-
-The API lives under `backend/`: Express routes call controllers, controllers validate requests and delegate to the task service, Mongoose models represent persisted tasks, and an in-process broadcaster manages SSE clients. Mutating operations are serialized within the single API process; ordering changes return and broadcast all affected tasks with canonical timestamps. The server startup seed runs only if the task collection is empty. This intentionally avoids additional infrastructure for a single shared board and one backend instance.
-
-## Project structure
-
-```text
-.
-├── backend/
-│   ├── src/
-│   │   ├── controllers/       # Request handling and JSON errors
-│   │   ├── events/            # SSE client registry and broadcaster
-│   │   ├── models/            # Mongoose Task schema and domain types
-│   │   ├── services/          # Persistence, ordering, seed-on-empty
-│   │   ├── validation/        # Zod request schemas
-│   │   ├── app.ts             # Express middleware and health route
-│   │   ├── routes.ts
-│   │   └── server.ts
-│   └── .env.example
-├── frontend/
-│   ├── src/
-│   │   ├── components/        # Board column, card, task modal
-│   │   ├── hooks/useBoard.ts  # Board state, optimistic CRUD, SSE, URL state
-│   │   ├── services/api.ts
-│   │   ├── utils/             # Ordering, filtering, query-state utilities
-│   │   ├── App.tsx
-│   │   └── styles.css
-│   └── .env.example
-├── package.json              # npm workspaces and root scripts
-├── render.yaml
-└── vercel.json
-```
-
-## Local installation
-
-Requirements: Node.js 20+ and npm 10+, plus a reachable MongoDB instance.
-
-1. Copy `backend/.env.example` to `backend/.env` and set `MONGODB_URI`. Set `CLIENT_ORIGIN=http://localhost:5173` for local development.
-2. Copy `frontend/.env.example` to `frontend/.env`. The default API URL is `http://localhost:4000`.
-3. From the repository root, install once with `npm install`.
-4. Start both applications with `npm run dev`.
-5. Open `http://localhost:5173`. The API listens on `http://localhost:4000`.
-
-The API intentionally refuses to start without `MONGODB_URI`; frontend static fallback data is not used. If the task collection is empty on initial API connection, five starter tasks are inserted. Existing records are never replaced.
-
-## Environment variables
-
-### Backend (`backend/.env`)
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `PORT` | No | API port; defaults to `4000` locally. Render supplies its own port. |
-| `MONGODB_URI` | Yes | MongoDB connection string. Keep this only in the backend environment. |
-| `CLIENT_ORIGIN` | No locally; required for deployment | Comma-separated exact allowed browser origins; defaults to `http://localhost:5173`. Set the exact Vercel origin in Render. |
-| `SIMULATE_API_FAILURE` | No | Set `true` to force mutation failures in non-production only. Disabled by default. |
-
-### Frontend (`frontend/.env`)
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `VITE_API_BASE_URL` | Required for deployment | Backend origin without `/api`. Development defaults to `http://localhost:4000`; production has no localhost fallback and shows a configuration error if unset. This is public configuration, never a secret. |
-
-Do not commit `.env` files. `.gitignore` excludes them.
-
-## MongoDB Atlas setup
-
-1. Create a MongoDB Atlas account and an M0 free cluster.
-2. Create a database user with a strong password and grant only the needed database access.
-3. Add your development IP address to Network Access. For Render, allow the Render service's outbound IP ranges or use Atlas's broader access rule only if you understand the security tradeoff.
-4. Select **Connect → Drivers**, copy the Node.js connection URI, replace the username/password/database placeholders, and put the result in `backend/.env` as `MONGODB_URI`.
-5. Never add this URI to a `VITE_` variable or commit it.
-
-## Run and verify
+Requirements: Node.js 20+, npm 10+, MongoDB.
 
 ```sh
+npm install
+cp backend/.env.example backend/.env
 npm run dev
+```
+
+Frontend: `http://localhost:5173`. API: `http://localhost:4000`. Vite proxies `/api` to the local API target.
+
+Forgotten passwords cannot be recovered automatically because accounts do not contain email addresses.
+
+## Environment
+
+### Render backend
+
+| Variable | Required | Value |
+|---|---|---|
+| `MONGODB_URI` | Yes | MongoDB Atlas connection string |
+| `CLIENT_ORIGIN` | Yes | Exact Vercel origin, for example `https://your-app.vercel.app` |
+| `NODE_ENV` | Yes | `production` |
+| `PORT` | Render supplies | `10000` in render.yaml |
+
+No Argon2 secret, session signing secret, or MongoDB credential is required in the frontend.
+
+### Vercel frontend
+
+The project root is `frontend`. `VITE_API_BASE_URL` should normally be empty: `/api` is served through the Vercel same-origin rewrite in `vercel.json`.
+
+Set the rewrite destination in `frontend/vercel.json` or root `vercel.json` to the exact Render API origin, including `https://`. Keep `backend` behind the proxy rather than using direct cross-origin credentials.
+
+## API
+
+- `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`
+- `GET /api/auth/me`, `POST /api/auth/change-password`
+- `GET/POST /api/boards`, `GET/PATCH/DELETE /api/boards/:boardId`
+- `POST/PATCH/DELETE /api/boards/:boardId/members(/:userId)`
+- `GET /api/board?boardId=...`, `POST /api/tasks`, `PATCH/DELETE /api/tasks/:id?boardId=...`
+- `GET /api/events?boardId=...&connectionId=...`
+
+Public boards allow anonymous reads and task views. Private boards require owner or member access. Only owners/editors can write. Owners manage settings and members. Viewers are read-only.
+
+## Session and CSRF security
+
+Session cookies are opaque random tokens stored only as SHA-256 hashes in MongoDB. The browser receives HttpOnly, Secure (production), SameSite=Lax cookies through the same-origin Vercel proxy. State-changing requests require the session CSRF token in `X-CSRF-Token`. Logout and password change invalidate sessions as appropriate.
+
+Registration and login endpoints are rate limited. Passwords use Argon2id with a unique salt from the library. Passwords are never logged or returned.
+
+## MongoDB migration
+
+On the first registration, an idempotent transaction marker (`system_migrations/legacy-kanban-board-v1`) protects the legacy migration. Existing tasks without `boardId` are assigned to one private board owned by the first registrant. Task IDs and task fields are preserved; no tasks are deleted or reseeded. MongoDB transactions require a replica set, so Atlas is appropriate. If Atlas migration cannot run transactionally, a one-time migration script may be added and run only once against the existing database.
+
+## Tests and verification
+
+```sh
 npm run typecheck
 npm test
 npm run build
 ```
 
-`SIMULATE_API_FAILURE=true` in the backend environment forces mutation requests to return 503 in development so the optimistic rollback path can be exercised. It has no effect when `NODE_ENV=production`.
+Backend tests cover existing HTTP/validation behavior and SSE. Frontend tests cover ordering, filtering, URL state, snapshots and optimistic state utilities. Multi-user browser acceptance, MongoDB transactions, and production proxy behavior require external Atlas/Render/Vercel testing.
 
-Automated tests cover request validation, structured API errors, malformed IDs, health-check behavior, filter composition, position normalization, status ordering, and URL serialization. Database persistence, real failure rollback, and two-session SSE require an external MongoDB connection and browser sessions; see the acceptance checklist.
+## Deployment
 
-## API
+1. Deploy `backend` from the repository with `npm ci && npm run build --workspace backend` and `npm run start --workspace backend`.
+2. Set Render environment variables above and redeploy.
+3. Set the Vercel project root to `frontend` and root `vercel.json` destination to the exact Render HTTPS origin.
+4. Set Render `CLIENT_ORIGIN` to the exact Vercel HTTPS origin.
+5. Redeploy frontend and verify login/logout cookies, REST requests, and SSE network streams.
 
-All paths are rooted at `/api` and return JSON errors in the form `{ "error": "...", "details": [...] }` where validation details apply.
-
-| Method | Path | Behavior |
-| --- | --- | --- |
-| `GET` | `/api/board` | Returns `{ tasks }`, grouped in Backlog, Todo, In Progress, Done order and ordered by position within each status. |
-| `POST` | `/api/tasks` | Creates a validated task; server assigns ID, position, and timestamp. Optional `mutationId` is echoed in SSE. |
-| `PATCH` | `/api/tasks/:id` | Updates task fields; status/position changes reindex affected columns. Returns `{ task, affectedTasks }`. |
-| `DELETE` | `/api/tasks/:id` | Deletes a task and reindexes its column. Optional JSON body `{ "mutationId": "..." }`; returns `{ deletedId, deletedAt, affectedTasks }`. |
-| `GET` | `/api/events` | Native SSE stream with `task-created`, `task-updated`, and `task-deleted` named events plus heartbeats. |
-| `GET` | `/api/health` | Render health check; API only starts after MongoDB connects. |
-
-Task input limits: title 1–120 characters, description up to 2,000 characters, assignee 1–80 characters. Priority is `low`, `medium`, or `high`; status is one of the four board columns.
-
-## Collaboration and consistency
-
-A browser opens one `EventSource` connection. The API broadcaster writes named events with event IDs to connected clients and removes a client when its response closes; heartbeat comments keep idle streams alive. The browser reconnects automatically. On every connection after the first, the app reloads the board from the API to recover events missed while offline. The merge protects newer in-memory updates and pending local tasks from an older in-flight snapshot; deletion tombstones prevent stale snapshots from resurrecting deleted tasks.
-
-Every client mutation receives a UUID `mutationId`, sent in its API body and emitted with the matching SSE event. Own echoes are buffered until the HTTP outcome is known, deduplicated, then discarded on success or applied if the response fails after the server may have committed. During pending changes, events that touch the same task/column task set are buffered. Successful API responses reconcile canonical records only for tasks not superseded by a newer local mutation, after which buffered remote events are applied by `updatedAt`. A failed request restores only task IDs whose local mutation version is still current, then applies buffered remote events. This prevents a failed operation from reverting later local edits or remote changes.
-
-Reorders are serialized by a small in-process mutation queue and broadcast all task positions in the affected columns. MongoDB remains the source of truth. This queue is appropriate for the assignment's single API instance; it is not a distributed lock for horizontally scaled instances.
-
-
-## Coding agents used
-
-- GitHub Copilot (implementation, code review, and verification).
-- Explore subagent (read-only repository audit).
+SSE may require disabling proxy buffering at the Render/Vercel edge. Vercel rewrites must preserve streaming headers and long-lived connections; direct cross-origin cookies must not be used as a workaround.

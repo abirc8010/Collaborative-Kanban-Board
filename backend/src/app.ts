@@ -6,11 +6,13 @@ import { apiRouter } from './routes.js';
 import { errorHandler } from './controllers/taskController.js';
 
 export const app = express();
-app.use(cors({ origin: (origin, callback) => {
+app.set('trust proxy', 1);
+app.use(cors({ credentials: true, origin: (origin, callback) => {
   if (!origin || config.allowAnyOrigin || config.clientOrigins.includes(origin)) callback(null, true);
   else callback(Object.assign(new Error('Origin is not allowed by CORS'), { status: 403 }));
 } }));
 app.use(express.json({ limit: '32kb' }));
+app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store, max-age=0'); res.setHeader('Pragma', 'no-cache'); res.setHeader('Expires', '0'); next(); });
 app.get('/api/health', (_req, res) => {
   const connected = mongoose.connection.readyState === 1;
   res.status(connected ? 200 : 503).json({ status: connected ? 'ok' : 'unavailable', database: connected ? 'connected' : 'disconnected' });
