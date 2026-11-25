@@ -7,6 +7,14 @@ import { resolve } from 'node:path';
 import { clearSessionCookie, setSessionCookie, verifyCsrf } from './middleware/auth.js';
 
 describe('HTTP API surface', () => {
+  it('configures MongoDB startup with bounded server and connect timeouts', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/server.ts'), 'utf8');
+    expect(source).toContain('serverSelectionTimeoutMS: 10_000');
+    expect(source).toContain('connectTimeoutMS: 10_000');
+    expect(source).toContain("app.listen(config.port, '0.0.0.0'");
+  });
+
+
   it('constructs frontend endpoints with exactly one /api prefix', () => {
     const apiSource = readFileSync(resolve(process.cwd(), '../frontend/src/services/api.ts'), 'utf8');
     expect(apiSource).toContain("const API_PREFIX = '/api';");
