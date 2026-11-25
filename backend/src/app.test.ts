@@ -69,6 +69,19 @@ describe('HTTP API surface', () => {
     expect(appSource).not.toContain('localStorage');
     expect(apiSource).not.toContain('localStorage');
   });
+  it('returns useful JSON for invalid registration payloads', async () => {
+    const response = await request(app).post('/api/auth/register').send({ username: 'abir test', password: 'short', confirmPassword: 'short' });
+    expect(response.status).toBe(400);
+    expect(response.body).toHaveProperty('error');
+    expect(response.body).toHaveProperty('details');
+  });
+
+  it('returns mismatch confirmation validation as JSON', async () => {
+    const response = await request(app).post('/api/auth/register').send({ username: 'abir-test', password: 'TwelveChars12', confirmPassword: 'Different12' });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Passwords do not match.');
+  });
+
   it('reports database readiness through the health endpoint', async () => {
     const response = await request(app).get('/api/health');
     expect(response.status).toBe(503);
