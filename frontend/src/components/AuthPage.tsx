@@ -89,9 +89,9 @@ export function AuthPage({
               <div className="password-field"><LockKeyhole size={16} /><input
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 type="password"
-                minLength={mode === 'login' ? 1 : 12}
+                minLength={1}
                 maxLength={128}
-                placeholder={mode === 'login' ? 'Enter your password' : 'At least 12 characters'}
+                placeholder="Enter your password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
@@ -103,7 +103,7 @@ export function AuthPage({
                 <div className="password-field"><LockKeyhole size={16} /><input
                   autoComplete="new-password"
                   type="password"
-                  minLength={12}
+                  minLength={1}
                   maxLength={128}
                   placeholder="Enter your password again"
                   value={confirmPassword}

@@ -11,12 +11,13 @@ describe('authentication validation', () => {
     expect(() => usernameSchema.parse('abir.test')).toThrow();
   });
 
-  it('accepts matching registration fields and minimum password length', () => {
-    expect(registerSchema.parse({ username: 'abir_test', password: 'twelvechars12', confirmPassword: 'twelvechars12' }).username).toBe('abir_test');
+  it('accepts matching registration fields with a short password', () => {
+    expect(registerSchema.parse({ username: 'abir_test', password: 'short', confirmPassword: 'short' }).username).toBe('abir_test');
   });
 
-  it('rejects mismatched confirmation and short passwords', () => {
+  it('rejects mismatched confirmation and empty passwords', () => {
     expect(() => registerSchema.parse({ username: 'abir-test', password: 'short', confirmPassword: 'different' })).toThrow();
+    expect(() => registerSchema.parse({ username: 'abir-test', password: '', confirmPassword: '' })).toThrow();
   });
 
   it('uses identical strict fields for login', () => {
