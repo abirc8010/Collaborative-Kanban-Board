@@ -1,10 +1,10 @@
 import mongoose, { Types } from 'mongoose';
-import { BoardModel, type BoardRecord, type BoardRole, type Visibility } from '../models/Board.js';
+import { BoardModel, type BoardRecord, type BoardRole, type LinkAccess, type Visibility } from '../models/Board.js';
 import { TaskModel } from '../models/Task.js';
 import { UserModel, type UserRecord } from '../models/User.js';
-import { broadcastToBoard, closeBoardConnections, closeBoardMember, closePublicBoardClients, updateBoardMemberRole } from '../events/broadcaster.js';
+import { broadcastToBoard, closeBoardConnections, closeBoardMember, closeLinkAccessClients, updateBoardMemberRole } from '../events/broadcaster.js';
 
-export interface BoardAccess { boardId: string; role: BoardRole; canView: true; canEdit: boolean; canManage: boolean; ownerId: string; visibility: Visibility; }
+export interface BoardAccess { boardId: string; role: BoardRole; canView: true; canEdit: boolean; canManage: boolean; ownerId: string; visibility: Visibility; linkAccess: LinkAccess; source: 'owner' | 'member' | 'link'; }
 function notFound(): never { throw Object.assign(new Error('Board not found or access denied.'), { status: 404 }); }
 function objectId(id: string): Types.ObjectId {
   if (!Types.ObjectId.isValid(id)) notFound();
@@ -15,12 +15,20 @@ export async function getBoardAccess(boardId: string, user?: UserRecord): Promis
   const board = await BoardModel.findById(objectId(boardId)).exec();
   if (!board) notFound();
   const ownerId = String(board.ownerId);
+  const legacyPublic = board.visibility === 'public' && !board.linkAccess;
+  const linkAccess: LinkAccess = board.linkAccess?.enabled
+    ? { enabled: true, role: board.linkAccess.role }
+    : legacyPublic ? { enabled: true, role: 'viewer' } : { enabled: false, role: 'viewer' };
   let role: BoardRole | undefined;
-  if (user && ownerId === user.id) role = 'owner';
-  else if (user) role = board.members.find((member) => String(member.userId) === user.id)?.role as BoardRole | undefined;
-  if (!role && board.visibility === 'public') role = 'public';
+  let source: BoardAccess['source'] = 'link';
+  if (user && ownerId === user.id) { role = 'owner'; source = 'owner'; }
+  else if (user) {
+    const memberRole = board.members.find((member) => String(member.userId) === user.id)?.role as BoardRole | undefined;
+    if (memberRole) { role = memberRole; source = 'member'; }
+  }
+  if (!role && linkAccess.enabled) role = user ? linkAccess.role : (linkAccess.role === 'editor' ? 'link-editor' : 'public');
   if (!role) notFound();
-  return { boardId: String(board._id), role, canView: true, canEdit: role === 'owner' || role === 'editor', canManage: role === 'owner', ownerId, visibility: board.visibility };
+  return { boardId: String(board._id), role, canView: true, canEdit: role === 'owner' || role === 'editor', canManage: role === 'owner', ownerId, visibility: linkAccess.enabled ? 'public' : 'private', linkAccess, source };
 }
 
 async function records(boards: Array<InstanceType<typeof BoardModel>>): Promise<BoardRecord[]> {
@@ -35,7 +43,8 @@ async function records(boards: Array<InstanceType<typeof BoardModel>>): Promise<
     const owner = byId.get(String(board.ownerId));
     return {
       id: String(board._id), name: board.name, ownerId: String(board.ownerId), ownerUsername: owner?.username ?? 'Unknown',
-      visibility: board.visibility as Visibility,
+      visibility: (board.linkAccess?.enabled ?? board.visibility === 'public') ? 'public' : 'private',
+      linkAccess: board.linkAccess ? { enabled: board.linkAccess.enabled, role: board.linkAccess.role as 'viewer' | 'editor' } : { enabled: board.visibility === 'public', role: 'viewer' },
       role: 'owner',
       members: board.members.map((member) => ({ userId: String(member.userId), username: byId.get(String(member.userId))?.username ?? 'Unknown', role: member.role as 'viewer' | 'editor', createdAt: member.createdAt.toISOString() })),
       memberCount: board.members.length + 1,
@@ -56,24 +65,44 @@ export async function getBoard(boardId: string, currentUserId?: string): Promise
   const list = await records([board]);
   const record = list[0];
   if (!record) notFound();
-  if (currentUserId && record.ownerId !== currentUserId) record.role = board.members.find((member) => String(member.userId) === currentUserId)?.role ?? 'public';
-  else if (!currentUserId) record.role = 'public';
-  if (record.role === 'public') record.members = [];
+  const isOwner = currentUserId === record.ownerId;
+  const member = currentUserId ? board.members.find((entry) => String(entry.userId) === currentUserId) : undefined;
+  if (!isOwner) record.role = member?.role ?? (record.linkAccess.enabled ? (currentUserId ? record.linkAccess.role : record.linkAccess.role === 'editor' ? 'link-editor' : 'public') : 'public');
+  if (!isOwner && !member) record.members = [];
   return record;
 }
 
 export async function createBoard(ownerId: string, name: string, visibility: Visibility): Promise<BoardRecord> {
-  const board = await BoardModel.create({ name, ownerId, visibility, members: [] });
+  const board = await BoardModel.create({ name, ownerId, visibility, linkAccess: { enabled: visibility === 'public', role: 'viewer' }, members: [] });
   const record = await getBoard(String(board._id), ownerId);
   return record;
 }
 
-export async function updateBoard(boardId: string, patch: { name?: string; visibility?: Visibility }): Promise<BoardRecord> {
-  const board = await BoardModel.findByIdAndUpdate(objectId(boardId), { $set: patch }, { new: true, runValidators: true }).exec();
+export async function updateBoard(boardId: string, patch: { name?: string; visibility?: Visibility; linkAccess?: LinkAccess }): Promise<BoardRecord> {
+  const update: Record<string, unknown> = {};
+  if (patch.name !== undefined) update.name = patch.name;
+  if (patch.linkAccess) {
+    update.linkAccess = patch.linkAccess;
+    update.visibility = patch.linkAccess.enabled ? 'public' : 'private';
+  } else if (patch.visibility) {
+    update.visibility = patch.visibility;
+    update.linkAccess = { enabled: patch.visibility === 'public', role: 'viewer' };
+  }
+  const board = await BoardModel.findByIdAndUpdate(objectId(boardId), { $set: update }, { new: true, runValidators: true }).exec();
   if (!board) notFound();
-  if (patch.visibility === 'private') closePublicBoardClients(boardId);
+  if (patch.visibility || patch.linkAccess) closeLinkAccessClients(boardId);
   broadcastToBoard(boardId, 'board:members-changed', { boardId, visibility: board.visibility });
   return getBoard(boardId, String(board.ownerId));
+}
+
+export async function migrateLegacyBoardLinkAccess(): Promise<void> {
+  const legacyBoards = BoardModel.find({ linkAccess: { $exists: false } }).cursor();
+  for await (const board of legacyBoards) {
+    await BoardModel.collection.updateOne(
+      { _id: board._id, linkAccess: { $exists: false } },
+      { $set: { linkAccess: { enabled: board.visibility === 'public', role: 'viewer' } } },
+    );
+  }
 }
 
 export async function deleteBoard(boardId: string): Promise<void> {

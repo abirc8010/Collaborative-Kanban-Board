@@ -10,6 +10,7 @@ import { useBoard } from './hooks/useBoard';
 import { api, setCsrfToken } from './services/api';
 import { filterTasks } from './utils/board';
 import { STATUSES, type Board, type Status, type Task, type TaskDraft, type User } from './types';
+import { boardPath, resolveBoardRoute } from './utils/boardRoute';
 
 export default function App() {
   const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated' | 'error'>('checking');
@@ -20,7 +21,12 @@ export default function App() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [passwordBusy, setPasswordBusy] = useState(false);
-  const [boardId, setBoardId] = useState(() => new URLSearchParams(location.search).get('board') ?? '');
+  const [boardId, setBoardId] = useState(() => {
+    const route = resolveBoardRoute(location.pathname, location.search);
+    if (route.legacy) history.replaceState({}, '', `${route.path}${location.hash}`);
+    return route.boardId;
+  });
+  const [authPrompt, setAuthPrompt] = useState(false);
 
   useEffect(() => {
     if (authInitialized.current) return;
@@ -42,24 +48,29 @@ export default function App() {
       });
   }, []);
   useEffect(() => {
-    const onPop = () => setBoardId(new URLSearchParams(location.search).get('board') ?? '');
+    const onPop = () => {
+      const route = resolveBoardRoute(location.pathname, location.search);
+      if (route.legacy) history.replaceState({}, '', `${route.path}${location.hash}`);
+      setBoardId(route.boardId);
+      setAuthPrompt(false);
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
   const openBoard = useCallback((id: string) => {
-    const url = new URL(location.href); url.searchParams.set('board', id); history.pushState({}, '', url);
+    const url = new URL(location.href); url.pathname = boardPath(id); url.searchParams.delete('board'); history.pushState({}, '', url);
     setBoardId(id);
   }, []);
   const dashboard = useCallback(() => {
-    const url = new URL(location.href); url.searchParams.delete('board'); history.pushState({}, '', url); setBoardId('');
+    const url = new URL(location.href); url.pathname = '/'; url.searchParams.delete('board'); history.pushState({}, '', url); setBoardId(''); setAuthPrompt(false);
   }, []);
   const authenticate = async (username: string, password: string, confirmPassword: string) => {
     setAuthError('');
     const result = authMode === 'register' ? await api.register(username, password, confirmPassword) : await api.login(username, password);
-    setCsrfToken(result.csrfToken); setUser(result.user); setAuthState('authenticated');
+    setCsrfToken(result.csrfToken); setUser(result.user); setAuthPrompt(false); setAuthState('authenticated');
   };
-  const logout = useCallback(async () => { await api.logout().catch(() => undefined); setUser(null); setCsrfToken(''); setBoardId(''); setAuthState('unauthenticated'); }, []);
+  const logout = useCallback(async () => { await api.logout().catch(() => undefined); setUser(null); setCsrfToken(''); dashboard(); setAuthState('unauthenticated'); }, [dashboard]);
   const changePassword = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const currentPassword = String(form.get('currentPassword') ?? ''); const newPassword = String(form.get('newPassword') ?? ''); const confirmPassword = String(form.get('confirmPassword') ?? '');
@@ -72,12 +83,28 @@ export default function App() {
 
   if (authState === 'checking') return <main className="dashboard-page"><div className="loading-state"><span className="loader" /><span>Loading...</span></div></main>;
   if (authState === 'error') return <main className="dashboard-page"><section className="error-banner"><span>{authError}</span><button onClick={() => window.location.reload()}>Retry</button></section></main>;
+  if (authState === 'unauthenticated' && boardId && !authPrompt) return <PublicBoardGate boardId={boardId} user={user} mode={authMode} onDashboard={dashboard} onRequestAuth={() => setAuthPrompt(true)} onMode={setAuthMode} onSubmit={authenticate} error={authError} />;
   if (authState === 'unauthenticated' || (!user && !boardId)) return <AuthPage mode={authMode} onMode={(mode) => { setAuthMode(mode); setAuthError(''); }} onSubmit={authenticate} error={authError} />;
   if (user && !boardId) return <><BoardDashboard username={user.username} onOpen={openBoard} onLogout={() => void logout()} onChangePassword={() => setPasswordOpen(true)} />{passwordOpen && <div className="modal-backdrop"><section className="task-modal"><header className="modal-header"><div><span className="eyebrow">SECURITY</span><h2>Change password</h2></div><button className="icon-button" onClick={() => setPasswordOpen(false)}><X size={18} /></button></header><form className="auth-form" onSubmit={changePassword}><label className="form-field"><span>Current password</span><input name="currentPassword" type="password" required /></label><label className="form-field"><span>New password</span><input name="newPassword" type="password" minLength={12} maxLength={128} required /></label><label className="form-field"><span>Confirm new password</span><input name="confirmPassword" type="password" minLength={12} maxLength={128} required /></label>{passwordError && <div className="form-error">{passwordError}</div>}<button className="button button-primary" disabled={passwordBusy}>Change password</button></form></section><div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPasswordOpen(false); }} /></div>}</>;
-  return <><BoardView key={boardId} boardId={boardId} onDashboard={dashboard} onAccessRevoked={dashboard} />{passwordOpen && <div className="modal-backdrop"><section className="task-modal"><header className="modal-header"><div><span className="eyebrow">SECURITY</span><h2>Change password</h2></div><button className="icon-button" onClick={() => setPasswordOpen(false)}><X size={18} /></button></header><form className="auth-form" onSubmit={changePassword}><label className="form-field"><span>Current password</span><input name="currentPassword" type="password" required /></label><label className="form-field"><span>New password</span><input name="newPassword" type="password" minLength={12} maxLength={128} required /></label><label className="form-field"><span>Confirm new password</span><input name="confirmPassword" type="password" minLength={12} maxLength={128} required /></label>{passwordError && <div className="form-error">{passwordError}</div>}<button className="button button-primary" disabled={passwordBusy}>Change password</button></form></section><div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPasswordOpen(false); }} /></div>}</>;
+  return <><BoardView key={boardId} boardId={boardId} user={user} onRequestAuth={() => setAuthPrompt(true)} onDashboard={dashboard} onAccessRevoked={dashboard} />{passwordOpen && <div className="modal-backdrop"><section className="task-modal"><header className="modal-header"><div><span className="eyebrow">SECURITY</span><h2>Change password</h2></div><button className="icon-button" onClick={() => setPasswordOpen(false)}><X size={18} /></button></header><form className="auth-form" onSubmit={changePassword}><label className="form-field"><span>Current password</span><input name="currentPassword" type="password" required /></label><label className="form-field"><span>New password</span><input name="newPassword" type="password" minLength={12} maxLength={128} required /></label><label className="form-field"><span>Confirm new password</span><input name="confirmPassword" type="password" minLength={12} maxLength={128} required /></label>{passwordError && <div className="form-error">{passwordError}</div>}<button className="button button-primary" disabled={passwordBusy}>Change password</button></form></section><div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPasswordOpen(false); }} /></div>}</>;
 }
 
-function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string; onDashboard: () => void; onAccessRevoked: () => void }) {
+function PublicBoardGate({ boardId, user, mode, onDashboard, onRequestAuth, onMode, onSubmit, error }: { boardId: string; user: User | null; mode: 'login' | 'register'; onDashboard: () => void; onRequestAuth: () => void; onMode: (mode: 'login' | 'register') => void; onSubmit: (username: string, password: string, confirmPassword: string) => Promise<void>; error: string }) {
+  const [accessible, setAccessible] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void api.getBoard(boardId).then(() => { if (active) setAccessible(true); }).catch(() => { if (active) setFailed(true); }).finally(() => { if (active) setChecking(false); });
+    return () => { active = false; };
+  }, [boardId]);
+  if (accessible) return <BoardView boardId={boardId} user={user} onRequestAuth={onRequestAuth} onDashboard={onDashboard} onAccessRevoked={onDashboard} />;
+  if (checking) return <main className="dashboard-page"><div className="loading-state"><span className="loader" /><span>Opening shared board…</span></div></main>;
+  if (failed) return <AuthPage mode={mode} onMode={onMode} onSubmit={onSubmit} error={error || 'Sign in to access this board, or register if you do not have an account.'} />;
+  return <main className="dashboard-page"><div className="error-banner"><span>Could not open this board.</span><button onClick={onDashboard}>Back to boards</button></div></main>;
+}
+
+function BoardView({ boardId, user, onRequestAuth, onDashboard, onAccessRevoked }: { boardId: string; user: User | null; onRequestAuth: () => void; onDashboard: () => void; onAccessRevoked: () => void }) {
   useEffect(() => { if (import.meta.env.DEV) console.debug('[BOARD] mount', boardId); return () => { if (import.meta.env.DEV) console.debug('[BOARD] unmount', boardId); }; }, [boardId]);
   const [board, setBoard] = useState<Board | null>(null);
   const [boardError, setBoardError] = useState('');
@@ -86,6 +113,7 @@ function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string;
   const [shareName, setShareName] = useState('');
   const [shareRole, setShareRole] = useState<'viewer' | 'editor'>('viewer');
   const [shareError, setShareError] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [boardName, setBoardName] = useState('');
   const loadBoard = useCallback(async () => {
@@ -101,6 +129,7 @@ function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string;
   }, [boardId]);
   useEffect(() => { void loadBoard(); }, [loadBoard]);
   const canEdit = board?.role === 'owner' || board?.role === 'editor';
+  const needsLoginToEdit = Boolean(board?.linkAccess.enabled && board.linkAccess.role === 'editor' && !user);
   const boardState = useBoard(boardId, '', Boolean(canEdit), onAccessRevoked, loadBoard);
   const [modal, setModal] = useState<{ task: Task | null; status: Status } | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
@@ -114,16 +143,28 @@ function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string;
   const save = async (draft: TaskDraft) => { if (modal?.task) await boardState.update(modal.task, draft); else await boardState.create(draft); };
   const clearFilters = () => boardState.changeFilters({ search: '', priority: 'all', assignee: 'all' });
   const share = async (event: React.FormEvent) => { event.preventDefault(); setShareBusy(true); setShareError(''); try { const result = await api.addMember(boardId, shareName.trim(), shareRole); setBoard(result.board); setShareName(''); } catch (reason) { setShareError(reason instanceof Error ? reason.message : 'Could not share board.'); } finally { setShareBusy(false); } };
+  const changeLinkAccess = async (enabled: boolean, role = board?.linkAccess.role ?? 'viewer') => {
+    if (!board) return;
+    setShareError('');
+    try {
+      const result = await api.updateBoard(boardId, { linkAccess: { enabled, role: enabled ? role as 'viewer' | 'editor' : 'viewer' } });
+      setBoard(result.board);
+    } catch (reason) { setShareError(reason instanceof Error ? reason.message : 'Could not update general access.'); }
+  };
+  const copyBoardLink = async () => {
+    try { await navigator.clipboard.writeText(new URL(boardPath(boardId), window.location.origin).toString()); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 1800); }
+    catch { setShareError('Could not copy the link. Copy it from your browser address bar instead.'); }
+  };
 
   if (boardError && !board) return <main className="dashboard-page"><div className="error-banner"><span>{boardError}</span><button onClick={onDashboard}>Back to boards</button></div></main>;
   return <main className="app-shell"><section className="main-area"><header className="topbar"><button className="brand topbar-brand" onClick={onDashboard}><div className="brand-mark"><LayoutGrid size={17} /></div><span>Kanban</span></button><span className={`connection ${boardState.connected ? 'is-connected' : ''}`}><i />{boardState.connected ? 'Live updates' : 'Reconnecting'}</span></header>
-    <div className="content"><section className="project-heading"><div className="project-heading-copy"><div className="eyebrow"><span className="project-dot" />PROJECT BOARD</div><h1>{board?.name ?? 'Loading board'}</h1><p>{board?.visibility === 'public' ? 'Public board' : 'Private board'}{canEdit ? '' : ' — read only'}</p></div><div className="board-header-actions">{boardState.presence.length > 0 && <div className="avatar-stack" title={`${boardState.presence.map((person) => person.username).join(', ')}`}>{boardState.presence.slice(0, 5).map((person) => <span key={person.userId} className="presence-avatar" title={person.username}>{person.username.slice(0, 1).toUpperCase()}</span>)}</div>}<div className="board-action-group">{board?.role === 'owner' && <><button className="icon-button board-settings-button" onClick={() => setSettingsOpen(true)} aria-label="Board settings" title="Board settings"><Settings2 size={17} /></button><button className="button button-quiet board-share-button" onClick={() => setShareOpen(true)}><Users size={16} />Share</button></>}{canEdit && <button className="button button-primary add-task-top" onClick={() => setStatusModal('Backlog')}><Plus size={16} />New task</button>}</div></div></section>
+    <div className="content"><section className="project-heading"><div className="project-heading-copy"><div className="eyebrow"><span className="project-dot" />PROJECT BOARD</div><h1>{board?.name ?? 'Loading board'}</h1><p>{board?.linkAccess.enabled ? `Anyone with the link · ${board.linkAccess.role === 'editor' ? 'Editor' : 'Viewer'}` : 'Restricted'}{canEdit ? '' : ' — read only'}</p></div><div className="board-header-actions">{boardState.presence.length > 0 && <div className="avatar-stack" title={`${boardState.presence.map((person) => person.username).join(', ')}`}>{boardState.presence.slice(0, 5).map((person) => <span key={person.userId} className="presence-avatar" title={person.username}>{person.username.slice(0, 1).toUpperCase()}</span>)}</div>}<div className="board-action-group">{board?.role === 'owner' && <><button className="icon-button board-settings-button" onClick={() => setSettingsOpen(true)} aria-label="Board settings" title="Board settings"><Settings2 size={17} /></button><button className="button button-quiet board-share-button" onClick={() => setShareOpen(true)}><Users size={16} />Share</button></>}{canEdit && <button className="button button-primary add-task-top" onClick={() => setStatusModal('Backlog')}><Plus size={16} />New task</button>}{needsLoginToEdit && <button className="button button-primary" onClick={onRequestAuth}>Sign in to edit</button>}</div></div></section>
     {boardState.error && <div className="error-banner"><span>{boardState.error}</span><button onClick={() => void boardState.refresh()}>Retry</button><button className="banner-close" onClick={() => boardState.setError('')}><X size={16} /></button></div>}{boardState.notice && <div className="notice-banner"><span>{boardState.notice}</span><button onClick={() => boardState.setNotice('')}><X size={15} /></button></div>}
     <section className="board-toolbar"><div className="toolbar-controls"><label className="search-box"><Search size={16} /><input placeholder="Search tasks..." value={boardState.filters.search} onChange={(event) => boardState.changeFilters({ search: event.target.value })} /></label><button className={`filter-button ${showFilters || filtered ? 'filter-active' : ''}`} onClick={() => setShowFilters((value) => !value)}><SlidersHorizontal size={15} />Filters</button></div></section>
     {showFilters && <div className="filter-panel"><div className="filter-select"><label>Priority</label><select value={boardState.filters.priority} onChange={(event) => boardState.changeFilters({ priority: event.target.value as typeof boardState.filters.priority })}><option value="all">All priorities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div><div className="filter-select"><label>Assignee</label><select value={boardState.filters.assignee} onChange={(event) => boardState.changeFilters({ assignee: event.target.value })}><option value="all">All assignees</option>{assignees.map((assignee) => <option key={assignee}>{assignee}</option>)}</select></div>{filtered && <button className="clear-filters" onClick={clearFilters}>Clear filters</button>}</div>}
     {boardState.loading && !boardState.tasks.length ? <div className="loading-state"><span className="loader" /><span>Loading tasks...</span></div> : <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={({ active }) => setActiveTask(boardState.tasks.find((task) => task.id === String(active.id)) ?? null)} onDragEnd={onDragEnd} onDragCancel={() => setActiveTask(null)}><div className="board-scroll"><div className="board-grid">{STATUSES.map((status) => <BoardColumn key={status} status={status} tasks={visible.filter((task) => task.status === status)} dragDisabled={filtered || !canEdit} readOnly={!canEdit} onAdd={setStatusModal} onOpen={(task) => setModal({ task, status: task.status })} />)}</div></div><DragOverlay>{activeTask ? <TaskCard task={activeTask} onOpen={() => undefined} dragDisabled /> : null}</DragOverlay></DndContext>}
     </div></section>{modal && <TaskModal key={modal.task?.id ?? `new-${modal.status}`} task={modal.task} initialStatus={modal.status} readOnly={!canEdit} onClose={() => setModal(null)} onSave={save} onDelete={canEdit && modal.task ? (task) => boardState.remove(task) : undefined} />}
-    {settingsOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}><section className="task-modal board-settings-modal" role="dialog" aria-modal="true" aria-labelledby="board-settings-title"><header className="modal-header"><div><span className="eyebrow">BOARD SETTINGS</span><h2 id="board-settings-title">Manage board</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Close board settings"><X size={18} /></button></header><div className="board-settings-content"><section className="settings-section"><div className="settings-section-heading"><div><strong>Board details</strong><span>Choose a clear name for this board.</span></div></div><label className="form-field"><span>Board name</span><input value={boardName} maxLength={80} onChange={(event) => setBoardName(event.target.value)} placeholder="Board name" /></label><div className="settings-actions"><button className="button button-primary" disabled={!boardName.trim()} onClick={async () => { try { const result = await api.updateBoard(boardId, { name: boardName.trim(), ...(board?.visibility ? { visibility: board.visibility } : {}) }); setBoard(result.board); setSettingsOpen(false); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not rename board.'); } }}>Save changes</button></div></section><section className="settings-section"><div className="settings-section-heading"><div><strong>Visibility</strong><span>Control who can open this board.</span></div><span className={`settings-status ${board?.visibility}`}>{board?.visibility === 'public' ? 'Public' : 'Private'}</span></div><button className="visibility-setting" onClick={async () => { if (!board) return; try { const result = await api.updateBoard(boardId, { visibility: board.visibility === 'public' ? 'private' : 'public' }); setBoard(result.board); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not change visibility.'); } }}><span className="visibility-setting-icon">{board?.visibility === 'public' ? <Users size={17} /> : <LockKeyhole size={17} />}</span><span className="visibility-setting-copy"><strong>{board?.visibility === 'public' ? 'Make board private' : 'Make board public'}</strong><small>{board?.visibility === 'public' ? 'Only the owner and invited members can access it.' : 'Anyone with the link can view this board.'}</small></span><span className="visibility-setting-action">Change</span></button></section><section className="settings-section settings-danger"><div className="settings-section-heading"><div><strong>Delete board</strong><span>Permanent action that removes the board and its tasks.</span></div></div><button className="delete-board-button" onClick={async () => { if (!confirm('Delete this board and all of its tasks?')) return; try { await api.deleteBoard(boardId); setSettingsOpen(false); onDashboard(); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not delete board.'); } }}><Trash2 size={16} />Delete board</button></section></div></section></div>}
+    {settingsOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}><section className="task-modal board-settings-modal" role="dialog" aria-modal="true" aria-labelledby="board-settings-title"><header className="modal-header"><div><span className="eyebrow">BOARD SETTINGS</span><h2 id="board-settings-title">Manage board</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Close board settings"><X size={18} /></button></header><div className="board-settings-content"><section className="settings-section"><div className="settings-section-heading"><div><strong>Board details</strong><span>Choose a clear name for this board.</span></div></div><label className="form-field"><span>Board name</span><input value={boardName} maxLength={80} onChange={(event) => setBoardName(event.target.value)} placeholder="Board name" /></label><div className="settings-actions"><button className="button button-primary" disabled={!boardName.trim()} onClick={async () => { try { const result = await api.updateBoard(boardId, { name: boardName.trim() }); setBoard(result.board); setSettingsOpen(false); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not rename board.'); } }}>Save changes</button></div></section><section className="settings-section"><div className="settings-section-heading"><div><strong>Visibility</strong><span>Control who can open this board.</span></div><span className={`settings-status ${board?.visibility}`}>{board?.visibility === 'public' ? 'Public' : 'Private'}</span></div><button className="visibility-setting" onClick={async () => { if (!board) return; try { const result = await api.updateBoard(boardId, { visibility: board.visibility === 'public' ? 'private' : 'public' }); setBoard(result.board); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not change visibility.'); } }}><span className="visibility-setting-icon">{board?.visibility === 'public' ? <Users size={17} /> : <LockKeyhole size={17} />}</span><span className="visibility-setting-copy"><strong>{board?.visibility === 'public' ? 'Make board private' : 'Make board public'}</strong><small>{board?.visibility === 'public' ? 'Only the owner and invited members can access it.' : 'Anyone with the link can view this board.'}</small></span><span className="visibility-setting-action">Change</span></button></section><section className="settings-section settings-danger"><div className="settings-section-heading"><div><strong>Delete board</strong><span>Permanent action that removes the board and its tasks.</span></div></div><button className="delete-board-button" onClick={async () => { if (!confirm('Delete this board and all of its tasks?')) return; try { await api.deleteBoard(boardId); setSettingsOpen(false); onDashboard(); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not delete board.'); } }}><Trash2 size={16} />Delete board</button></section></div></section></div>}
     {shareOpen && (
       <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShareOpen(false); }}>
         <section className="task-modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-board-title">
@@ -131,6 +172,19 @@ function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string;
             <div><span className="eyebrow">BOARD ACCESS</span><h2 id="share-board-title">Share board</h2></div>
             <button className="icon-button" onClick={() => setShareOpen(false)} aria-label="Close sharing dialog"><X size={18} /></button>
           </header>
+
+          <section className="settings-section general-access-section">
+            <div className="settings-section-heading"><div><strong>General access</strong><span>Choose who can open this board.</span></div></div>
+            <label className="form-field"><span>Access</span><select value={board?.linkAccess.enabled ? 'anyone' : 'restricted'} onChange={(event) => void changeLinkAccess(event.target.value === 'anyone')}>
+              <option value="restricted">Restricted</option><option value="anyone">Anyone with the link</option>
+            </select></label>
+            {board?.linkAccess.enabled && <label className="form-field"><span>Permission</span><select value={board.linkAccess.role} onChange={(event) => void changeLinkAccess(true, event.target.value as 'viewer' | 'editor')}>
+              <option value="viewer">Viewer — can view only</option><option value="editor">Editor — can edit tasks (sign-in required)</option>
+            </select></label>}
+            <p className="settings-help">{board?.linkAccess.enabled ? board.linkAccess.role === 'editor' ? 'Anyone with this URL can view. They must sign in before making task changes.' : 'Anyone with this URL can view the board but cannot make changes.' : 'Only you and the people listed below can access this board.'}</p>
+            <div className="share-link-row"><input aria-label="Board link" readOnly value={new URL(boardPath(boardId), window.location.origin).toString()} /><button className="button button-quiet" type="button" onClick={() => void copyBoardLink()}>{linkCopied ? 'Copied!' : 'Copy link'}</button></div>
+            {shareError && <div className="form-error">{shareError}</div>}
+          </section>
 
           <form onSubmit={share} className="share-form">
             <div className="share-form-fields">
@@ -164,6 +218,7 @@ function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string;
               </div>
             ) : <div className="member-empty"><Users size={18} /><span>No one else has access yet.</span></div>}
           </section>
+
         </section>
       </div>
     )}

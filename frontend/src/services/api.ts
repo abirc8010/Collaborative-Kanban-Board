@@ -1,4 +1,4 @@
-import type { Board, BoardEvent, Task, TaskDraft, User, Visibility } from '../types';
+import type { Board, BoardEvent, LinkAccess, Task, TaskDraft, User, Visibility } from '../types';
 
 const API_PREFIX = '/api';
 let csrfToken = '';
@@ -31,7 +31,7 @@ export const api = {
   boards: () => request<{ boards: Board[] }>('/boards'),
   createBoard: (name: string, visibility: Visibility) => request<{ board: Board }>('/boards', { method: 'POST', body: JSON.stringify({ name, visibility }) }),
   getBoard: (boardId: string) => request<{ board: Board }>(`/boards/${encodeURIComponent(boardId)}`),
-  updateBoard: (boardId: string, patch: { name?: string; visibility?: Visibility }) => request<{ board: Board }>(`/boards/${encodeURIComponent(boardId)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  updateBoard: (boardId: string, patch: { name?: string; visibility?: Visibility; linkAccess?: LinkAccess }) => request<{ board: Board }>(`/boards/${encodeURIComponent(boardId)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteBoard: (boardId: string) => request<{ ok: boolean }>(`/boards/${encodeURIComponent(boardId)}`, { method: 'DELETE', body: '{}' }),
   addMember: (boardId: string, username: string, role: 'viewer' | 'editor') => request<{ board: Board }>(`/boards/${encodeURIComponent(boardId)}/members`, { method: 'POST', body: JSON.stringify({ username, role }) }),
   updateMember: (boardId: string, userId: string, role: 'viewer' | 'editor') => request<{ board: Board }>(`/boards/${encodeURIComponent(boardId)}/members/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify({ role }) }),

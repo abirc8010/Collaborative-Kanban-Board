@@ -47,7 +47,7 @@ export async function connectToBoard(req: Request, res: Response, next: NextFunc
     res.flushHeaders();
     res.write('retry: 3000\n\n');
     const sessionId = req.sessionRecord?.id ?? null;
-    const cleanup = connectBoardClient(res, boardId, { connectionId, userId: req.user?.id ?? null, username: req.user?.username ?? null, role: access.role, sessionId, expiresAt: req.sessionRecord?.expiresAt.getTime() ?? null });
+    const cleanup = connectBoardClient(res, boardId, { connectionId, userId: req.user?.id ?? null, username: req.user?.username ?? null, role: access.role, source: access.source, sessionId, expiresAt: req.sessionRecord?.expiresAt.getTime() ?? null });
     res.on('close', cleanup);
   } catch (error) { next(error); }
 }

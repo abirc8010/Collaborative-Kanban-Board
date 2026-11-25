@@ -58,6 +58,7 @@ describe('HTTP API surface', () => {
     const apiRewrite = vercel.rewrites.find((rewrite) => rewrite.source.startsWith('/api'));
     expect(apiRewrite?.destination).toContain('/api/:path*');
     expect(apiRewrite?.destination).toMatch(/^https:\/\//);
+    expect(vercel.rewrites).toContainEqual({ source: '/(.*)', destination: '/index.html' });
     const apiClient = readFileSync(resolve(process.cwd(), '../frontend/src/services/api.ts'), 'utf8');
     expect(apiClient).not.toContain('collaborative-kanban-api.onrender.com');
     expect(apiClient).toContain("const API_PREFIX = '/api';");

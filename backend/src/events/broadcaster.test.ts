@@ -1,7 +1,7 @@
 import { PassThrough } from 'node:stream';
 import type { Response } from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
-import { addClient, broadcast, connectedClients, connectBoardClient } from './broadcaster.js';
+import { addClient, broadcast, broadcastToBoard, connectedClients, connectBoardClient } from './broadcaster.js';
 
 const disconnect: Array<() => void> = [];
 afterEach(() => {
@@ -16,6 +16,16 @@ describe('SSE broadcaster', () => {
     const payload = response.read() as string | null;
     expect(payload ?? '').not.toContain('presence:snapshot');
     expect(payload ?? '').not.toContain('presence:joined');
+  });
+
+  it('does not expose invited-member or presence events to link Editors', () => {
+    const response = new PassThrough();
+    response.setEncoding('utf8');
+    disconnect.push(connectBoardClient(response as unknown as Response, 'link-editor-board', { connectionId: '22222222-2222-4222-8222-222222222222', userId: null, username: null, role: 'link-editor', source: 'link', sessionId: null, expiresAt: null }));
+    response.read();
+    broadcastToBoard('link-editor-board', 'board:members-changed', { userId: 'private-member' });
+    broadcastToBoard('link-editor-board', 'presence:joined', { userId: 'private-member', username: 'secret' });
+    expect(response.read()).toBeNull();
   });
 
   it('sends named events with IDs and removes closed clients', () => {

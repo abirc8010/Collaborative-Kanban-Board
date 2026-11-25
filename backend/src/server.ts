@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { app } from './app.js';
 import { config } from './config.js';
 import { ensureAuthCollections } from './services/authService.js';
+import { migrateLegacyBoardLinkAccess } from './services/boardService.js';
 
 process.on('unhandledRejection', (reason) => {
   const detail = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
@@ -61,6 +62,7 @@ async function start(): Promise<void> {
       }),
     ]);
     if (initializationTimeout) clearTimeout(initializationTimeout);
+    await migrateLegacyBoardLinkAccess();
     console.info('[DATABASE] MongoDB collections initialized');
   } catch (error) {
     console.error(`[DATABASE] MongoDB connection or initialization failed: ${mongoErrorDetail(error)}`);

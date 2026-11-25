@@ -3,7 +3,7 @@ import type { Response } from 'express';
 
 export type BoardEventName = 'task-created' | 'task-updated' | 'task-deleted' | 'board:members-changed' | 'presence:snapshot' | 'presence:joined' | 'presence:left' | 'presence:heartbeat' | 'board:access-revoked';
 export interface BoardEvent<T = unknown> { eventId?: string; boardId: string; type: BoardEventName; mutationId: string | null; data: T; }
-export interface StreamIdentity { connectionId: string; userId: string | null; username: string | null; role: string; sessionId: string | null; expiresAt: number | null; }
+export interface StreamIdentity { connectionId: string; userId: string | null; username: string | null; role: string; source?: 'owner' | 'member' | 'link'; sessionId: string | null; expiresAt: number | null; }
 interface StreamClient { boardId: string; response: Response; identity: StreamIdentity; lastSeen: number; }
 const boards = new Map<string, Map<string, StreamClient>>();
 const legacyClients = new Set<Response>();
@@ -22,7 +22,8 @@ function members(boardId: string): Map<string, StreamClient> {
 function send(boardId: string, type: BoardEventName, data: unknown, mutationId: string | null = null, exceptConnectionId?: string): void {
   const event: BoardEvent = { boardId, type, mutationId, data };
   for (const client of boards.get(boardId)?.values() ?? []) {
-    if (client.identity.role === 'public' && (type === 'board:members-changed' || type === 'presence:snapshot' || type === 'presence:joined' || type === 'presence:left' || type === 'presence:heartbeat')) continue;
+    const linkClient = client.identity.source === 'link' || client.identity.role === 'public' || client.identity.role === 'link-editor';
+    if (linkClient && (type === 'board:members-changed' || type === 'presence:snapshot' || type === 'presence:joined' || type === 'presence:left' || type === 'presence:heartbeat')) continue;
     if (client.identity.connectionId === exceptConnectionId) continue;
     try { write(client.response, event); } catch { removeClient(client, true); }
   }
@@ -102,6 +103,9 @@ export function closeAnonymousBoardClients(boardId: string): void {
 }
 export function closePublicBoardClients(boardId: string): void {
   for (const client of [...(boards.get(boardId)?.values() ?? [])].filter((entry) => entry.identity.role === 'public')) closeClientWithRevocation(client);
+}
+export function closeLinkAccessClients(boardId: string): void {
+  for (const client of [...(boards.get(boardId)?.values() ?? [])].filter((entry) => entry.identity.source === 'link' || entry.identity.role === 'public' || entry.identity.role === 'link-editor')) closeClientWithRevocation(client);
 }
 export function closeBoardConnections(boardId: string): void {
   for (const client of [...(boards.get(boardId)?.values() ?? [])]) closeClientWithRevocation(client);

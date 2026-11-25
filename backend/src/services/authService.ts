@@ -42,7 +42,7 @@ export async function registerUser(username: string, password: string): Promise<
         const legacyExists = await TaskModel.exists(legacyFilter).session(session);
         let boardId: Types.ObjectId | undefined;
         if (legacyExists) {
-          const [board] = await BoardModel.create([{ name: 'Legacy board', ownerId: created._id, visibility: 'private', members: [] }], { session });
+          const [board] = await BoardModel.create([{ name: 'Legacy board', ownerId: created._id, visibility: 'private', linkAccess: { enabled: false, role: 'viewer' }, members: [] }], { session });
           if (!board) throw new Error('Unable to create legacy board');
           boardId = board._id;
           await TaskModel.collection.updateMany(legacyFilter, { $set: { boardId } }, { session });

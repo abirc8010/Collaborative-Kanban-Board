@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://collaborative-kanban-api.onrender.com/api/:path*"
+      "destination": "https://collaborative-kanban-api-hsq1.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",

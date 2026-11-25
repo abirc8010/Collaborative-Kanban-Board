@@ -9,22 +9,17 @@ export async function loadBoardAccess(request: Request, _response: Response, nex
     const boardId = String(request.params.boardId ?? request.query.boardId ?? request.body?.boardId ?? '');
     if (!boardId) {
       if (process.env.NODE_ENV === 'test') {
-        request.boardAccess = { boardId: '', role: 'owner', canView: true, canEdit: true, canManage: false, ownerId: '', visibility: 'private' };
+        request.boardAccess = { boardId: '', role: 'owner', canView: true, canEdit: true, canManage: false, ownerId: '', visibility: 'private', linkAccess: { enabled: false, role: 'viewer' }, source: 'owner' };
         next(); return;
       }
-      const { BoardModel } = await import('../models/Board.js');
-      const boardCount = await BoardModel.countDocuments().exec();
-      if (boardCount !== 1) throw Object.assign(new Error(boardCount === 0 ? 'No board is available.' : 'boardId is required when more than one board exists.'), { status: boardCount === 0 ? 404 : 400 });
-      const board = await BoardModel.findOne().exec();
-      if (!board) throw Object.assign(new Error('Board not found.'), { status: 404 });
-      request.boardAccess = await getBoardAccess(String(board._id), request.user);
-      next(); return;
+      throw Object.assign(new Error('boardId is required.'), { status: 400 });
     }
     request.boardAccess = await getBoardAccess(boardId, request.user);
     next();
   } catch (error) { next(error); }
 }
 export function requireEditor(request: Request, _response: Response, next: NextFunction): void {
+  if (request.boardAccess?.role === 'link-editor' && !request.user) { next(Object.assign(new Error('Sign in to edit this board.'), { status: 401 })); return; }
   if (!request.boardAccess?.canEdit) { next(Object.assign(new Error('Editor access is required.'), { status: request.boardAccess ? 403 : 404 })); return; }
   next();
 }

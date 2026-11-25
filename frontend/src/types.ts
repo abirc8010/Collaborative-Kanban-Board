@@ -26,9 +26,10 @@ export interface BoardEvent {
   mutationId: string | null;
   data: { boardId?: string; task?: Task; affectedTasks?: Task[]; deletedId?: string; deletedAt?: string; users?: PresenceUser[]; userId?: string; username?: string; action?: string; role?: BoardRole; connectionId?: string };
 }
-export type BoardRole = 'owner' | 'editor' | 'viewer' | 'public';
+export type BoardRole = 'owner' | 'editor' | 'viewer' | 'public' | 'link-editor';
 export type Visibility = 'public' | 'private';
+export interface LinkAccess { enabled: boolean; role: 'viewer' | 'editor'; }
 export interface BoardMember { userId: string; username: string; role: 'viewer' | 'editor'; createdAt: string; }
-export interface Board { id: string; name: string; ownerId: string; ownerUsername: string; visibility: Visibility; role: BoardRole; members: BoardMember[]; memberCount: number; createdAt: string; updatedAt: string; }
+export interface Board { id: string; name: string; ownerId: string; ownerUsername: string; visibility: Visibility; linkAccess: LinkAccess; role: BoardRole; members: BoardMember[]; memberCount: number; createdAt: string; updatedAt: string; }
 export interface User { id: string; username: string; createdAt: string; updatedAt: string; }
 export interface PresenceUser { userId: string; username: string; }
