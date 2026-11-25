@@ -124,6 +124,48 @@ function BoardView({ boardId, onDashboard, onAccessRevoked }: { boardId: string;
     {boardState.loading && !boardState.tasks.length ? <div className="loading-state"><span className="loader" /><span>Loading tasks...</span></div> : <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={({ active }) => setActiveTask(boardState.tasks.find((task) => task.id === String(active.id)) ?? null)} onDragEnd={onDragEnd} onDragCancel={() => setActiveTask(null)}><div className="board-scroll"><div className="board-grid">{STATUSES.map((status) => <BoardColumn key={status} status={status} tasks={visible.filter((task) => task.status === status)} dragDisabled={filtered || !canEdit} readOnly={!canEdit} onAdd={setStatusModal} onOpen={(task) => setModal({ task, status: task.status })} />)}</div></div><DragOverlay>{activeTask ? <TaskCard task={activeTask} onOpen={() => undefined} dragDisabled /> : null}</DragOverlay></DndContext>}
     </div></section>{modal && <TaskModal key={modal.task?.id ?? `new-${modal.status}`} task={modal.task} initialStatus={modal.status} readOnly={!canEdit} onClose={() => setModal(null)} onSave={save} onDelete={canEdit && modal.task ? (task) => boardState.remove(task) : undefined} />}
     {settingsOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}><section className="task-modal board-settings-modal" role="dialog" aria-modal="true" aria-labelledby="board-settings-title"><header className="modal-header"><div><span className="eyebrow">BOARD SETTINGS</span><h2 id="board-settings-title">Manage board</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Close board settings"><X size={18} /></button></header><div className="board-settings-content"><section className="settings-section"><div className="settings-section-heading"><div><strong>Board details</strong><span>Choose a clear name for this board.</span></div></div><label className="form-field"><span>Board name</span><input value={boardName} maxLength={80} onChange={(event) => setBoardName(event.target.value)} placeholder="Board name" /></label><div className="settings-actions"><button className="button button-primary" disabled={!boardName.trim()} onClick={async () => { try { const result = await api.updateBoard(boardId, { name: boardName.trim(), ...(board?.visibility ? { visibility: board.visibility } : {}) }); setBoard(result.board); setSettingsOpen(false); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not rename board.'); } }}>Save changes</button></div></section><section className="settings-section"><div className="settings-section-heading"><div><strong>Visibility</strong><span>Control who can open this board.</span></div><span className={`settings-status ${board?.visibility}`}>{board?.visibility === 'public' ? 'Public' : 'Private'}</span></div><button className="visibility-setting" onClick={async () => { if (!board) return; try { const result = await api.updateBoard(boardId, { visibility: board.visibility === 'public' ? 'private' : 'public' }); setBoard(result.board); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not change visibility.'); } }}><span className="visibility-setting-icon">{board?.visibility === 'public' ? <Users size={17} /> : <LockKeyhole size={17} />}</span><span className="visibility-setting-copy"><strong>{board?.visibility === 'public' ? 'Make board private' : 'Make board public'}</strong><small>{board?.visibility === 'public' ? 'Only the owner and invited members can access it.' : 'Anyone with the link can view this board.'}</small></span><span className="visibility-setting-action">Change</span></button></section><section className="settings-section settings-danger"><div className="settings-section-heading"><div><strong>Delete board</strong><span>Permanent action that removes the board and its tasks.</span></div></div><button className="delete-board-button" onClick={async () => { if (!confirm('Delete this board and all of its tasks?')) return; try { await api.deleteBoard(boardId); setSettingsOpen(false); onDashboard(); } catch (reason) { setBoardError(reason instanceof Error ? reason.message : 'Could not delete board.'); } }}><Trash2 size={16} />Delete board</button></section></div></section></div>}
-    {shareOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShareOpen(false); }}><section className="task-modal share-modal"><header className="modal-header"><div><span className="eyebrow">BOARD ACCESS</span><h2>Share board</h2></div><button className="icon-button" onClick={() => setShareOpen(false)}><X size={18} /></button></header><form onSubmit={share} className="share-form"><div className="form-grid"><label className="form-field"><span>Username</span><input value={shareName} onChange={(event) => setShareName(event.target.value)} minLength={3} maxLength={30} required /></label><label className="form-field"><span>Permission</span><select value={shareRole} onChange={(event) => setShareRole(event.target.value as 'viewer' | 'editor')}><option value="viewer">Viewer</option><option value="editor">Editor</option></select></label></div>{shareError && <div className="form-error">{shareError}</div>}<button className="button button-primary" disabled={shareBusy}>Share</button></form><div className="member-list">{board?.members.map((member) => <div className="member-row" key={member.userId}><span className="presence-avatar">{member.username.slice(0,1).toUpperCase()}</span><strong>{member.username}</strong><select value={member.role} onChange={(event) => void api.updateMember(boardId, member.userId, event.target.value as 'viewer' | 'editor').then((result) => setBoard(result.board)).catch((reason) => setShareError(reason instanceof Error ? reason.message : 'Could not update member.') )}><option value="viewer">Viewer</option><option value="editor">Editor</option></select><button className="delete-button" onClick={() => void api.removeMember(boardId, member.userId).then((result) => setBoard(result.board)).catch((reason) => setShareError(reason instanceof Error ? reason.message : 'Could not revoke access.'))}>Remove</button></div>)}</div></section></div>}
+    {shareOpen && (
+      <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShareOpen(false); }}>
+        <section className="task-modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-board-title">
+          <header className="modal-header">
+            <div><span className="eyebrow">BOARD ACCESS</span><h2 id="share-board-title">Share board</h2></div>
+            <button className="icon-button" onClick={() => setShareOpen(false)} aria-label="Close sharing dialog"><X size={18} /></button>
+          </header>
+
+          <form onSubmit={share} className="share-form">
+            <div className="share-form-fields">
+              <label className="form-field"><span>Username</span><input value={shareName} onChange={(event) => setShareName(event.target.value)} minLength={3} maxLength={30} placeholder="Enter username" required /></label>
+              <label className="form-field"><span>Permission</span><select value={shareRole} onChange={(event) => setShareRole(event.target.value as 'viewer' | 'editor')}><option value="viewer">Viewer</option><option value="editor">Editor</option></select></label>
+            </div>
+            {shareError && <div className="form-error">{shareError}</div>}
+            <button className="button button-primary share-submit" disabled={shareBusy || !shareName.trim()}><Users size={15} />{shareBusy ? 'Sharing…' : 'Share board'}</button>
+          </form>
+
+          <section className="member-section">
+            <div className="member-section-heading"><strong>People with access</strong><span>{board?.members.length ?? 0}</span></div>
+            {board?.members.length ? (
+              <div className="member-list">
+                {board.members.map((member) => (
+                  <div className="member-row" key={member.userId}>
+                    <span className="member-avatar">{member.username.slice(0, 1).toUpperCase()}</span>
+                    <div className="member-copy"><strong>{member.username}</strong><span>{member.role === 'editor' ? 'Can edit tasks' : 'Can view tasks'}</span></div>
+                    <select className="member-role" aria-label={`Permission for ${member.username}`} value={member.role} onChange={(event) => void api.updateMember(boardId, member.userId, event.target.value as 'viewer' | 'editor').then((result) => setBoard(result.board)).catch((reason) => setShareError(reason instanceof Error ? reason.message : 'Could not update member.'))}><option value="viewer">Viewer</option><option value="editor">Editor</option></select>
+                    <button
+                      className="member-remove"
+                      type="button"
+                      onClick={() => {
+                        void api.removeMember(boardId, member.userId)
+                          .then((result) => setBoard(result.board))
+                          .catch((reason) => setShareError(reason instanceof Error ? reason.message : 'Could not revoke access.'));
+                      }}
+                    >Remove</button>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="member-empty"><Users size={18} /><span>No one else has access yet.</span></div>}
+          </section>
+        </section>
+      </div>
+    )}
   </main>;
 }
